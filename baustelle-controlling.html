@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Baustelle Controlling</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #f4f5f7;
+    color: #1f2430;
+  }
+  header {
+    background: #f59e0b;
+    color: #1f2430;
+    padding: 1rem 1.25rem;
+  }
+  header h1 { margin: 0 0 0.5rem 0; font-size: 1.3rem; }
+  nav { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  nav button.tab {
+    color: #1f2430;
+    border: none;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.4);
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+  nav button.tab.active { background: #1f2430; color: #fff; }
+  main { max-width: 960px; margin: 0 auto; padding: 1rem 1.25rem 3rem; }
+  .page { display: none; }
+  .page.active { display: block; }
+  h2 { margin-top: 0.5rem; }
+  .form-inline { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 1rem; }
+  .form-inline input { padding: 0.45rem 0.6rem; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; }
+  button { padding: 0.45rem 0.9rem; border: none; border-radius: 6px; background: #1f2430; color: #fff; font-weight: 600; cursor: pointer; }
+  button.secondary { background: #9aa0ad; }
+  button.danger { background: #c0392b; }
+  table.data-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+  table.data-table th, table.data-table td { padding: 0.55rem 0.7rem; border-bottom: 1px solid #eee; text-align: left; vertical-align: middle; }
+  table.data-table tfoot td { border-top: 2px solid #ddd; border-bottom: none; }
+  table.data-table input { width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 6px; }
+  .actions { display: flex; gap: 0.4rem; white-space: nowrap; }
+  .mannstunden { font-weight: 700; }
+  .empty { text-align: center; color: #888; padding: 1rem; }
+  .error { color: #c0392b; font-weight: 600; }
+  .status { color: #1a7f37; font-weight: 600; }
+  .summary { font-size: 1.1rem; }
+  .chart-table .chart-label { width: 110px; white-space: nowrap; }
+  .chart-cell { position: relative; }
+  .chart-cell .bar { background: #f59e0b; height: 1.2rem; border-radius: 4px; display: inline-block; vertical-align: middle; margin-right: 0.5rem; min-width: 2px; }
+  .hint { color: #666; font-size: 0.85rem; }
+  @media (max-width: 600px) {
+    header h1 { font-size: 1.1rem; }
+    table.data-table th, table.data-table td { padding: 0.4rem 0.4rem; font-size: 0.9rem; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏗️ Baustelle Controlling</h1>
+  <nav>
+    <button class="tab active" data-page="erfassung">Tageserfassung</button>
+    <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
+    <button class="tab" data-page="auswertung">Auswertung</button>
+  </nav>
+</header>
+<main>
+  <p class="hint">Alle Daten werden nur lokal in diesem Browser gespeichert (localStorage) – kein Server, keine Synchronisation zwischen Geräten.</p>
+
+  <section id="page-erfassung" class="page active">
+    <h2>Tageserfassung</h2>
+    <div class="form-inline">
+      <label>Datum: <input type="date" id="erfassung-datum" /></label>
+    </div>
+    <div id="erfassung-error" class="error"></div>
+    <div id="erfassung-status" class="status"></div>
+    <div id="erfassung-content"></div>
+  </section>
+
+  <section id="page-bauabschnitte" class="page">
+    <h2>Bauabschnitte verwalten</h2>
+    <div id="bauabschnitte-error" class="error"></div>
+    <form class="form-inline" id="bauabschnitt-form">
+      <input id="ba-name" placeholder="Name (z.B. Abschnitt A - Rohbau)" required />
+      <input id="ba-beschreibung" placeholder="Beschreibung (optional)" />
+      <button type="submit" id="ba-submit-btn">Hinzufügen</button>
+      <button type="button" class="secondary" id="ba-cancel-btn" style="display:none">Abbrechen</button>
+    </form>
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Beschreibung</th><th></th></tr></thead>
+      <tbody id="bauabschnitte-liste"></tbody>
+    </table>
+  </section>
+
+  <section id="page-auswertung" class="page">
+    <h2>Auswertung der Leistung</h2>
+    <form class="form-inline" id="auswertung-form">
+      <label>Von: <input type="date" id="aw-von" /></label>
+      <label>Bis: <input type="date" id="aw-bis" /></label>
+      <button type="submit">Aktualisieren</button>
+    </form>
+    <div id="auswertung-content"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const STORAGE_KEY = "baustelle-controlling-data";
+
+  function ladeDaten() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return { bauabschnitte: [], einsaetze: [], nextBaId: 1, nextEinsatzId: 1 };
+  }
+
+  function speicherDaten() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  let state = ladeDaten();
+
+  function heute() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function vorTagen(n) {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : String(str);
+    return div.innerHTML;
+  }
+
+  // ---- Tabs ----
+  document.querySelectorAll("nav button.tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("nav button.tab").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("page-" + btn.dataset.page).classList.add("active");
+      if (btn.dataset.page === "auswertung") renderAuswertung();
+      if (btn.dataset.page === "erfassung") renderErfassung();
+    });
+  });
+
+  // ---- Bauabschnitte ----
+  let editId = null;
+
+  function renderBauabschnitte() {
+    const tbody = document.getElementById("bauabschnitte-liste");
+    if (state.bauabschnitte.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" class="empty">Noch keine Bauabschnitte angelegt.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = state.bauabschnitte
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(
+        (b) => `
+      <tr>
+        <td>${escapeHtml(b.name)}</td>
+        <td>${escapeHtml(b.beschreibung || "")}</td>
+        <td class="actions">
+          <button data-edit="${b.id}">Bearbeiten</button>
+          <button class="danger" data-delete="${b.id}">Löschen</button>
+        </td>
+      </tr>`
+      )
+      .join("");
+
+    tbody.querySelectorAll("[data-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const b = state.bauabschnitte.find((x) => x.id === Number(btn.dataset.edit));
+        if (!b) return;
+        editId = b.id;
+        document.getElementById("ba-name").value = b.name;
+        document.getElementById("ba-beschreibung").value = b.beschreibung || "";
+        document.getElementById("ba-submit-btn").textContent = "Speichern";
+        document.getElementById("ba-cancel-btn").style.display = "inline-block";
+      });
+    });
+    tbody.querySelectorAll("[data-delete]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!confirm("Bauabschnitt wirklich löschen? Zugehörige Einsätze werden mit gelöscht.")) return;
+        const id = Number(btn.dataset.delete);
+        state.bauabschnitte = state.bauabschnitte.filter((x) => x.id !== id);
+        state.einsaetze = state.einsaetze.filter((x) => x.bauabschnitt_id !== id);
+        speicherDaten();
+        renderBauabschnitte();
+        renderErfassung();
+      });
+    });
+  }
+
+  document.getElementById("bauabschnitt-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById("bauabschnitte-error");
+    errEl.textContent = "";
+    const name = document.getElementById("ba-name").value.trim();
+    const beschreibung = document.getElementById("ba-beschreibung").value.trim();
+    if (!name) {
+      errEl.textContent = "Name ist erforderlich";
+      return;
+    }
+    if (editId) {
+      const b = state.bauabschnitte.find((x) => x.id === editId);
+      if (b) {
+        b.name = name;
+        b.beschreibung = beschreibung;
+      }
+      editId = null;
+      document.getElementById("ba-submit-btn").textContent = "Hinzufügen";
+      document.getElementById("ba-cancel-btn").style.display = "none";
+    } else {
+      state.bauabschnitte.push({ id: state.nextBaId++, name, beschreibung });
+    }
+    speicherDaten();
+    document.getElementById("bauabschnitt-form").reset();
+    renderBauabschnitte();
+    renderErfassung();
+  });
+
+  document.getElementById("ba-cancel-btn").addEventListener("click", () => {
+    editId = null;
+    document.getElementById("bauabschnitt-form").reset();
+    document.getElementById("ba-submit-btn").textContent = "Hinzufügen";
+    document.getElementById("ba-cancel-btn").style.display = "none";
+  });
+
+  // ---- Tageserfassung ----
+  const erfassungDatumInput = document.getElementById("erfassung-datum");
+  erfassungDatumInput.value = heute();
+  erfassungDatumInput.addEventListener("change", renderErfassung);
+
+  function findEinsatz(datum, bauabschnittId) {
+    return state.einsaetze.find((e) => e.datum === datum && e.bauabschnitt_id === bauabschnittId);
+  }
+
+  function renderErfassung(behalteStatus) {
+    const datum = erfassungDatumInput.value || heute();
+    const content = document.getElementById("erfassung-content");
+    document.getElementById("erfassung-error").textContent = "";
+    if (!behalteStatus) document.getElementById("erfassung-status").textContent = "";
+
+    if (state.bauabschnitte.length === 0) {
+      content.innerHTML = '<p class="empty">Noch keine Bauabschnitte angelegt. Bitte zuerst unter "Bauabschnitte" einen Bauabschnitt anlegen.</p>';
+      return;
+    }
+
+    let gesamt = 0;
+    const rows = state.bauabschnitte
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((b) => {
+        const e = findEinsatz(datum, b.id);
+        const anzahl = e ? e.anzahl_arbeiter : "";
+        const stunden = e ? e.stunden : "";
+        const notiz = e ? e.notiz || "" : "";
+        const mannstunden = e ? e.anzahl_arbeiter * e.stunden : 0;
+        gesamt += mannstunden;
+        return `
+        <tr data-ba="${b.id}">
+          <td>${escapeHtml(b.name)}</td>
+          <td><input type="number" min="0" class="in-anzahl" value="${anzahl}" /></td>
+          <td><input type="number" min="0" step="0.25" class="in-stunden" value="${stunden}" /></td>
+          <td class="mannstunden out-mannstunden">${mannstunden.toFixed(2)}</td>
+          <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(notiz)}" /></td>
+          <td class="actions">
+            <button data-save="${b.id}">Speichern</button>
+            ${e ? `<button class="danger" data-delete-einsatz="${b.id}">Löschen</button>` : ""}
+          </td>
+        </tr>`;
+      })
+      .join("");
+
+    content.innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Notiz</th><th></th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3"><strong>Gesamt Mannstunden am ${escapeHtml(datum)}</strong></td>
+            <td class="mannstunden"><strong>${gesamt.toFixed(2)}</strong></td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
+      </table>`;
+
+    content.querySelectorAll("tr[data-ba] .in-anzahl, tr[data-ba] .in-stunden").forEach((input) => {
+      input.addEventListener("input", () => {
+        const tr = input.closest("tr");
+        const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
+        const stunden = Number(tr.querySelector(".in-stunden").value || 0);
+        tr.querySelector(".out-mannstunden").textContent = (anzahl * stunden).toFixed(2);
+      });
+    });
+
+    content.querySelectorAll("[data-save]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const baId = Number(btn.dataset.save);
+        const tr = btn.closest("tr");
+        const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
+        const stunden = Number(tr.querySelector(".in-stunden").value || 0);
+        const notiz = tr.querySelector(".in-notiz").value;
+        const errEl = document.getElementById("erfassung-error");
+        const statusEl = document.getElementById("erfassung-status");
+        errEl.textContent = "";
+        if (anzahl < 0 || stunden < 0) {
+          errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
+          return;
+        }
+        let e = findEinsatz(datum, baId);
+        if (e) {
+          e.anzahl_arbeiter = anzahl;
+          e.stunden = stunden;
+          e.notiz = notiz;
+        } else {
+          state.einsaetze.push({
+            id: state.nextEinsatzId++,
+            datum,
+            bauabschnitt_id: baId,
+            anzahl_arbeiter: anzahl,
+            stunden,
+            notiz,
+          });
+        }
+        speicherDaten();
+        const ba = state.bauabschnitte.find((x) => x.id === baId);
+        statusEl.textContent = `Gespeichert: ${ba ? ba.name : ""}`;
+        renderErfassung(true);
+      });
+    });
+
+    content.querySelectorAll("[data-delete-einsatz]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const baId = Number(btn.dataset.deleteEinsatz);
+        state.einsaetze = state.einsaetze.filter((x) => !(x.datum === datum && x.bauabschnitt_id === baId));
+        speicherDaten();
+        renderErfassung();
+      });
+    });
+  }
+
+  // ---- Auswertung ----
+  const awVon = document.getElementById("aw-von");
+  const awBis = document.getElementById("aw-bis");
+  awVon.value = vorTagen(6);
+  awBis.value = heute();
+
+  document.getElementById("auswertung-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    renderAuswertung();
+  });
+
+  function renderAuswertung() {
+    const von = awVon.value;
+    const bis = awBis.value;
+    const content = document.getElementById("auswertung-content");
+
+    const eintraege = state.einsaetze
+      .filter((e) => e.datum >= von && e.datum <= bis)
+      .map((e) => {
+        const ba = state.bauabschnitte.find((b) => b.id === e.bauabschnitt_id);
+        return { ...e, bauabschnitt_name: ba ? ba.name : "(gelöscht)", mannstunden: e.anzahl_arbeiter * e.stunden };
+      })
+      .sort((a, b) => (a.datum + a.bauabschnitt_name).localeCompare(b.datum + b.bauabschnitt_name));
+
+    const proTagMap = {};
+    const proBaMap = {};
+    let gesamt = 0;
+
+    for (const e of eintraege) {
+      proTagMap[e.datum] = (proTagMap[e.datum] || 0) + e.mannstunden;
+      if (!proBaMap[e.bauabschnitt_id]) {
+        proBaMap[e.bauabschnitt_id] = { name: e.bauabschnitt_name, mannstunden: 0, arbeitstage: 0 };
+      }
+      proBaMap[e.bauabschnitt_id].mannstunden += e.mannstunden;
+      proBaMap[e.bauabschnitt_id].arbeitstage += 1;
+      gesamt += e.mannstunden;
+    }
+
+    const proTag = Object.entries(proTagMap).map(([datum, mannstunden]) => ({ datum, mannstunden }));
+    const proBa = Object.values(proBaMap).sort((a, b) => b.mannstunden - a.mannstunden);
+    const maxTag = Math.max(1, ...proTag.map((t) => t.mannstunden));
+    const maxBa = Math.max(1, ...proBa.map((b) => b.mannstunden));
+
+    content.innerHTML = `
+      <p class="summary">Gesamt im Zeitraum: <strong>${gesamt.toFixed(2)} Mannstunden</strong></p>
+
+      <h3>Mannstunden pro Tag</h3>
+      ${
+        proTag.length === 0
+          ? '<p class="empty">Keine Einträge im gewählten Zeitraum.</p>'
+          : `<table class="data-table chart-table"><tbody>${proTag
+              .map(
+                (t) => `
+            <tr>
+              <td class="chart-label">${escapeHtml(t.datum)}</td>
+              <td class="chart-cell">
+                <div class="bar" style="width:${(t.mannstunden / maxTag) * 100}%"></div>
+                <span>${t.mannstunden.toFixed(2)}</span>
+              </td>
+            </tr>`
+              )
+              .join("")}</tbody></table>`
+      }
+
+      <h3>Mannstunden pro Bauabschnitt</h3>
+      ${
+        proBa.length === 0
+          ? '<p class="empty">Keine Einträge im gewählten Zeitraum.</p>'
+          : `<table class="data-table chart-table">
+              <thead><tr><th>Bauabschnitt</th><th>Mannstunden</th><th>Erfasste Tage</th></tr></thead>
+              <tbody>${proBa
+                .map(
+                  (b) => `
+                <tr>
+                  <td>${escapeHtml(b.name)}</td>
+                  <td class="chart-cell">
+                    <div class="bar" style="width:${(b.mannstunden / maxBa) * 100}%"></div>
+                    <span>${b.mannstunden.toFixed(2)}</span>
+                  </td>
+                  <td>${b.arbeitstage}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+            </table>`
+      }
+
+      <h3>Alle Einträge</h3>
+      <table class="data-table">
+        <thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th></tr></thead>
+        <tbody>
+          ${
+            eintraege.length === 0
+              ? '<tr><td colspan="5" class="empty">Keine Einträge im gewählten Zeitraum.</td></tr>'
+              : eintraege
+                  .map(
+                    (e) => `
+              <tr>
+                <td>${escapeHtml(e.datum)}</td>
+                <td>${escapeHtml(e.bauabschnitt_name)}</td>
+                <td>${e.anzahl_arbeiter}</td>
+                <td>${e.stunden}</td>
+                <td>${e.mannstunden.toFixed(2)}</td>
+              </tr>`
+                  )
+                  .join("")
+          }
+        </tbody>
+      </table>`;
+  }
+
+  // ---- Initial render ----
+  renderBauabschnitte();
+  renderErfassung();
+})();
+</script>
+</body>
+</html>
