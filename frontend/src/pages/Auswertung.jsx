@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import { api } from "../api";
 
 function heute() {
@@ -9,6 +11,14 @@ function vorTagen(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
+}
+
+function escapeCsvWert(wert) {
+  const str = String(wert ?? "");
+  if (str.includes(";") || str.includes('"') || str.includes("\n")) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
 }
 
 export default function Auswertung() {
@@ -28,6 +38,69 @@ export default function Auswertung() {
   const maxProBauabschnitt = daten
     ? Math.max(1, ...daten.proBauabschnitt.map((b) => b.mannstunden))
     : 1;
+
+  function exportCsv() {
+    if (!daten) return;
+    const headers = ["Datum", "Bauabschnitt", "Anzahl Arbeiter", "Stunden", "Mannstunden"];
+    const zeilen = daten.eintraege.map((e) => [
+      e.datum,
+      e.bauabschnitt_name,
+      e.anzahl_arbeiter,
+      e.stunden,
+      e.mannstunden.toFixed(2),
+    ]);
+    const csv = [headers, ...zeilen].map((r) => r.map(escapeCsvWert).join(";")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Auswertung_${von}_bis_${bis}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportPdf() {
+    if (!daten) return;
+    const doc = new jsPDF();
+
+    doc.setFontSize(16);
+    doc.text("Baustelle Controlling - Auswertung", 14, 16);
+    doc.setFontSize(10);
+    doc.text(`Zeitraum: ${von} bis ${bis}`, 14, 23);
+    doc.text(`Gesamt Mannstunden: ${daten.gesamtMannstunden.toFixed(2)}`, 14, 29);
+
+    autoTable(doc, {
+      startY: 35,
+      head: [["Tag", "Mannstunden"]],
+      body: daten.proTag.map((t) => [t.datum, t.mannstunden.toFixed(2)]),
+    });
+
+    let y = doc.lastAutoTable.finalY + 10;
+    doc.text("Mannstunden pro Bauabschnitt", 14, y);
+    autoTable(doc, {
+      startY: y + 4,
+      head: [["Bauabschnitt", "Mannstunden", "Erfasste Tage"]],
+      body: daten.proBauabschnitt.map((b) => [b.bauabschnitt_name, b.mannstunden.toFixed(2), b.arbeitstage]),
+    });
+
+    y = doc.lastAutoTable.finalY + 10;
+    doc.text("Alle Einträge", 14, y);
+    autoTable(doc, {
+      startY: y + 4,
+      head: [["Datum", "Bauabschnitt", "Anzahl Arbeiter", "Stunden", "Mannstunden"]],
+      body: daten.eintraege.map((e) => [
+        e.datum,
+        e.bauabschnitt_name,
+        e.anzahl_arbeiter,
+        e.stunden,
+        e.mannstunden.toFixed(2),
+      ]),
+    });
+
+    doc.save(`Auswertung_${von}_bis_${bis}.pdf`);
+  }
 
   return (
     <section>
@@ -53,6 +126,15 @@ export default function Auswertung() {
 
       {daten && (
         <>
+          <div className="export-buttons">
+            <button type="button" onClick={exportPdf}>
+              Als PDF exportieren
+            </button>
+            <button type="button" onClick={exportCsv}>
+              Als CSV exportieren (Excel)
+            </button>
+          </div>
+
           <p className="summary">
             Gesamt im Zeitraum: <strong>{daten.gesamtMannstunden.toFixed(2)} Mannstunden</strong>
           </p>

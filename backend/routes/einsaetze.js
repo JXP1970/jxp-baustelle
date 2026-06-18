@@ -1,9 +1,14 @@
 const express = require("express");
+const fs = require("fs");
+const path = require("path");
 const db = require("../db");
+const { upload, uploadsDir } = require("../upload");
 
 const router = express.Router();
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const FOTO_ANZAHL_SUBQUERY = "(SELECT COUNT(*) FROM fotos f WHERE f.einsatz_id = e.id) AS foto_anzahl";
 
 function withMannstunden(row) {
   return { ...row, mannstunden: row.anzahl_arbeiter * row.stunden };
@@ -16,7 +21,7 @@ router.get("/", (req, res) => {
   if (datum) {
     rows = db
       .prepare(
-        `SELECT e.*, b.name AS bauabschnitt_name
+        `SELECT e.*, b.name AS bauabschnitt_name, ${FOTO_ANZAHL_SUBQUERY}
          FROM einsaetze e
          JOIN bauabschnitte b ON b.id = e.bauabschnitt_id
          WHERE e.datum = ?
@@ -26,7 +31,7 @@ router.get("/", (req, res) => {
   } else if (von && bis) {
     rows = db
       .prepare(
-        `SELECT e.*, b.name AS bauabschnitt_name
+        `SELECT e.*, b.name AS bauabschnitt_name, ${FOTO_ANZAHL_SUBQUERY}
          FROM einsaetze e
          JOIN bauabschnitte b ON b.id = e.bauabschnitt_id
          WHERE e.datum BETWEEN ? AND ?
@@ -36,7 +41,7 @@ router.get("/", (req, res) => {
   } else {
     rows = db
       .prepare(
-        `SELECT e.*, b.name AS bauabschnitt_name
+        `SELECT e.*, b.name AS bauabschnitt_name, ${FOTO_ANZAHL_SUBQUERY}
          FROM einsaetze e
          JOIN bauabschnitte b ON b.id = e.bauabschnitt_id
          ORDER BY e.datum DESC, b.name`
@@ -81,7 +86,7 @@ router.post("/", (req, res) => {
 
   const row = db
     .prepare(
-      `SELECT e.*, b.name AS bauabschnitt_name
+      `SELECT e.*, b.name AS bauabschnitt_name, ${FOTO_ANZAHL_SUBQUERY}
        FROM einsaetze e
        JOIN bauabschnitte b ON b.id = e.bauabschnitt_id
        WHERE e.datum = ? AND e.bauabschnitt_id = ?`
@@ -92,11 +97,43 @@ router.post("/", (req, res) => {
 });
 
 router.delete("/:id", (req, res) => {
+  const fotos = db.prepare("SELECT dateiname FROM fotos WHERE einsatz_id = ?").all(req.params.id);
   const result = db.prepare("DELETE FROM einsaetze WHERE id = ?").run(req.params.id);
   if (result.changes === 0) {
     return res.status(404).json({ error: "Eintrag nicht gefunden" });
   }
+  fotos.forEach((f) => fs.unlink(path.join(uploadsDir, f.dateiname), () => {}));
   res.status(204).end();
+});
+
+router.get("/:einsatzId/fotos", (req, res) => {
+  const einsatz = db.prepare("SELECT id FROM einsaetze WHERE id = ?").get(req.params.einsatzId);
+  if (!einsatz) {
+    return res.status(404).json({ error: "Eintrag nicht gefunden" });
+  }
+  const fotos = db
+    .prepare("SELECT * FROM fotos WHERE einsatz_id = ? ORDER BY erstellt_am")
+    .all(req.params.einsatzId);
+  res.json(fotos.map((f) => ({ ...f, url: `/uploads/${f.dateiname}` })));
+});
+
+router.post("/:einsatzId/fotos", upload.array("fotos", 10), (req, res) => {
+  const einsatz = db.prepare("SELECT id FROM einsaetze WHERE id = ?").get(req.params.einsatzId);
+  if (!einsatz) {
+    (req.files || []).forEach((f) => fs.unlink(f.path, () => {}));
+    return res.status(404).json({ error: "Eintrag nicht gefunden" });
+  }
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: "Keine Datei hochgeladen" });
+  }
+
+  const insert = db.prepare("INSERT INTO fotos (einsatz_id, dateiname) VALUES (?, ?)");
+  const inserted = req.files.map((f) => {
+    const result = insert.run(req.params.einsatzId, f.filename);
+    return db.prepare("SELECT * FROM fotos WHERE id = ?").get(result.lastInsertRowid);
+  });
+
+  res.status(201).json(inserted.map((f) => ({ ...f, url: `/uploads/${f.dateiname}` })));
 });
 
 router.get("/auswertung", (req, res) => {

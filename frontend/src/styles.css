@@ -162,6 +162,73 @@ button.danger {
   min-width: 2px;
 }
 
+.hint {
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.foto-row td {
+  background: #fafafa;
+}
+
+.foto-panel {
+  padding: 0.5rem 0.25rem;
+}
+
+.foto-upload-btn {
+  display: inline-block;
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  background: #1f2430;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 0.75rem;
+}
+
+.foto-upload-btn input {
+  display: none;
+}
+
+.foto-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.foto-thumb {
+  position: relative;
+  width: 96px;
+  height: 96px;
+}
+
+.foto-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+  border: 1px solid #ddd;
+}
+
+.foto-thumb button {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  line-height: 22px;
+  border-radius: 50%;
+  font-size: 0.9rem;
+}
+
+.export-buttons {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+}
+
 @media (max-width: 600px) {
   .app-header h1 {
     font-size: 1.1rem;

@@ -1,5 +1,8 @@
 const express = require("express");
+const fs = require("fs");
+const path = require("path");
 const db = require("../db");
+const { uploadsDir } = require("../upload");
 
 const router = express.Router();
 
@@ -36,10 +39,20 @@ router.put("/:id", (req, res) => {
 });
 
 router.delete("/:id", (req, res) => {
+  const fotos = db
+    .prepare(
+      `SELECT f.dateiname FROM fotos f
+       JOIN einsaetze e ON e.id = f.einsatz_id
+       WHERE e.bauabschnitt_id = ?`
+    )
+    .all(req.params.id);
+
   const result = db.prepare("DELETE FROM bauabschnitte WHERE id = ?").run(req.params.id);
   if (result.changes === 0) {
     return res.status(404).json({ error: "Bauabschnitt nicht gefunden" });
   }
+
+  fotos.forEach((f) => fs.unlink(path.join(uploadsDir, f.dateiname), () => {}));
   res.status(204).end();
 });
 

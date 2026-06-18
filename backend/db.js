@@ -5,6 +5,7 @@ const dbPath = path.join(__dirname, "baustelle.db");
 const db = new Database(dbPath);
 
 db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bauabschnitte (
@@ -22,6 +23,13 @@ db.exec(`
     stunden REAL NOT NULL,
     notiz TEXT,
     UNIQUE(datum, bauabschnitt_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS fotos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    einsatz_id INTEGER NOT NULL REFERENCES einsaetze(id) ON DELETE CASCADE,
+    dateiname TEXT NOT NULL,
+    erstellt_am TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
 

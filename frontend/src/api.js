@@ -39,4 +39,15 @@ export const api = {
 
   getAuswertung: (von, bis) =>
     fetch(`${BASE_URL}/einsaetze/auswertung?von=${von}&bis=${bis}`).then(handle),
+
+  getFotos: (einsatzId) => fetch(`${BASE_URL}/einsaetze/${einsatzId}/fotos`).then(handle),
+  uploadFotos: (einsatzId, files) => {
+    const formData = new FormData();
+    Array.from(files).forEach((file) => formData.append("fotos", file));
+    return fetch(`${BASE_URL}/einsaetze/${einsatzId}/fotos`, {
+      method: "POST",
+      body: formData,
+    }).then(handle);
+  },
+  deleteFoto: (id) => fetch(`${BASE_URL}/fotos/${id}`, { method: "DELETE" }).then(handle),
 };
