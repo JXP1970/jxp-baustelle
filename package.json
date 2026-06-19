@@ -1,0 +1,13 @@
+{
+  "name": "jxp-baustelle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Baustellen-Controlling: Arbeiter pro Bauabschnitt erfassen, Leistung auswerten, Beweisfotos und PDF/CSV-Export",
+  "scripts": {
+    "build": "npm install --prefix backend && npm install --prefix frontend && npm run build --prefix frontend",
+    "start": "node backend/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

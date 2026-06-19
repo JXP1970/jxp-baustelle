@@ -1,0 +1,24 @@
+# Render.com Blueprint fuer die Baustellen-Controlling-App.
+# Stellt die App als einen einzigen Web-Dienst online und legt einen
+# dauerhaften Speicher (Disk) an, damit Datenbank und Beweisfotos auch
+# nach Neustarts/Updates erhalten bleiben.
+#
+# Anleitung Schritt fuer Schritt: siehe DEPLOY.md
+services:
+  - type: web
+    name: baustelle-controlling
+    runtime: node
+    # "starter" ist noetig, damit ein dauerhafter Speicher (disk) moeglich ist
+    # und die App nicht nach Inaktivitaet die Daten verliert.
+    plan: starter
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: baustelle-data
+      mountPath: /var/data
+      sizeGB: 1
