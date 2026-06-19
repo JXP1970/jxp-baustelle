@@ -80,10 +80,11 @@
     #print-area h2 { font-size: 14px; margin: 14px 0 4px; }
     #print-area table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
     #print-area th, #print-area td { border: 1px solid #999; padding: 3px 6px; text-align: left; font-size: 11px; }
+    #print-area .foto-beweis-block { break-inside: avoid; margin-bottom: 10px; }
     #print-area .foto-beweis { display: flex; flex-wrap: wrap; gap: 8px; }
-    #print-area .foto-beweis figure { margin: 0; width: 30%; }
+    #print-area .foto-beweis figure { margin: 0; width: 30%; break-inside: avoid; }
     #print-area .foto-beweis img { width: 100%; border: 1px solid #999; }
-    #print-area .foto-beweis figcaption { font-size: 10px; }
+    #print-area .foto-beweis figcaption { font-size: 10px; text-align: center; }
   }
 </style>
 </head>
@@ -652,9 +653,23 @@
     triggerDownload(blob, `Auswertung_${von}_bis_${bis}.csv`);
   }
 
-  function exportPdf(von, bis) {
+  async function exportPdf(von, bis, btn) {
     const { eintraege, proTag, proBa, gesamt } = berechneAuswertung(von, bis);
     const printArea = document.getElementById("print-area");
+
+    const urspruenglicherText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = "Fotos werden geladen…"; }
+
+    let fotosProEinsatz = [];
+    try {
+      fotosProEinsatz = await Promise.all(
+        eintraege.map((e) => fotosFuerEinsatz(e.id).then((fotos) => ({ eintrag: e, fotos })).catch(() => ({ eintrag: e, fotos: [] })))
+      );
+    } catch (e) {
+      fotosProEinsatz = eintraege.map((e) => ({ eintrag: e, fotos: [] }));
+    }
+    const mitFotos = fotosProEinsatz.filter((x) => x.fotos && x.fotos.length > 0);
+
     printArea.innerHTML = `
       <h1>Baustelle Controlling – Auswertung</h1>
       <div class="meta">Zeitraum: ${escapeHtml(von)} bis ${escapeHtml(bis)}<br>Gesamt Mannstunden: <strong>${gesamt.toFixed(2)}</strong></div>
@@ -669,7 +684,25 @@
       <h2>Alle Einträge</h2>
       <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th></tr></thead><tbody>
         ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td></tr>`).join("") : '<tr><td colspan="5">Keine Einträge</td></tr>'}
-      </tbody></table>`;
+      </tbody></table>
+      ${
+        mitFotos.length
+          ? `<h2>Beweisfotos</h2>` +
+            mitFotos
+              .map(
+                ({ eintrag, fotos }) => `
+        <div class="foto-beweis-block">
+          <p><strong>${escapeHtml(eintrag.datum)} – ${escapeHtml(eintrag.bauabschnitt_name)}</strong></p>
+          <div class="foto-beweis">
+            ${fotos.map((f, i) => `<figure><img src="${f.dataUrl}" alt="Beweisfoto" /><figcaption>Foto ${i + 1}</figcaption></figure>`).join("")}
+          </div>
+        </div>`
+              )
+              .join("")
+          : ""
+      }`;
+
+    if (btn) { btn.disabled = false; btn.textContent = urspruenglicherText; }
     window.print();
   }
 
@@ -759,7 +792,7 @@
 
     const pdfBtn = document.getElementById("aw-export-pdf");
     const csvBtn = document.getElementById("aw-export-csv");
-    if (pdfBtn) pdfBtn.addEventListener("click", () => exportPdf(von, bis));
+    if (pdfBtn) pdfBtn.addEventListener("click", () => exportPdf(von, bis, pdfBtn));
     if (csvBtn) csvBtn.addEventListener("click", () => exportCsv(von, bis));
   }
 
