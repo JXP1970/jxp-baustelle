@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Baustelle Controlling</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #f4f5f7;
+    color: #1f2430;
+  }
+  header {
+    background: #f59e0b;
+    color: #1f2430;
+    padding: 1rem 1.25rem;
+  }
+  header h1 { margin: 0 0 0.5rem 0; font-size: 1.3rem; }
+  nav { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  nav button.tab {
+    color: #1f2430;
+    border: none;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.4);
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+  nav button.tab.active { background: #1f2430; color: #fff; }
+  main { max-width: 960px; margin: 0 auto; padding: 1rem 1.25rem 3rem; }
+  .page { display: none; }
+  .page.active { display: block; }
+  h2 { margin-top: 0.5rem; }
+  .form-inline { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 1rem; }
+  .form-inline input { padding: 0.45rem 0.6rem; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; }
+  button { padding: 0.45rem 0.9rem; border: none; border-radius: 6px; background: #1f2430; color: #fff; font-weight: 600; cursor: pointer; }
+  button.secondary { background: #9aa0ad; }
+  button.danger { background: #c0392b; }
+  table.data-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+  table.data-table th, table.data-table td { padding: 0.55rem 0.7rem; border-bottom: 1px solid #eee; text-align: left; vertical-align: middle; }
+  table.data-table tfoot td { border-top: 2px solid #ddd; border-bottom: none; }
+  table.data-table input { width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 6px; }
+  .actions { display: flex; gap: 0.4rem; white-space: nowrap; }
+  .mannstunden { font-weight: 700; }
+  .empty { text-align: center; color: #888; padding: 1rem; }
+  .error { color: #c0392b; font-weight: 600; }
+  .status { color: #1a7f37; font-weight: 600; }
+  .summary { font-size: 1.1rem; }
+  .chart-table .chart-label { width: 110px; white-space: nowrap; }
+  .chart-cell { position: relative; }
+  .chart-cell .bar { background: #f59e0b; height: 1.2rem; border-radius: 4px; display: inline-block; vertical-align: middle; margin-right: 0.5rem; min-width: 2px; }
+  .hint { color: #666; font-size: 0.85rem; }
+
+  .foto-row td { background: #fafafa; }
+  .foto-panel { padding: 0.5rem 0.25rem; }
+  .foto-upload-btn { display: inline-block; padding: 0.45rem 0.9rem; border-radius: 6px; background: #1f2430; color: #fff; font-weight: 600; cursor: pointer; margin-bottom: 0.75rem; }
+  .foto-upload-btn input { display: none; }
+  .foto-grid { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+  .foto-thumb { position: relative; width: 96px; height: 96px; }
+  .foto-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; display: block; border: 1px solid #ddd; }
+  .foto-thumb button { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; padding: 0; line-height: 22px; border-radius: 50%; font-size: 0.9rem; }
+  .export-buttons { display: flex; gap: 0.6rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+
+  #print-area { display: none; }
+
+  @media (max-width: 600px) {
+    header h1 { font-size: 1.1rem; }
+    table.data-table th, table.data-table td { padding: 0.4rem 0.4rem; font-size: 0.9rem; }
+  }
+
+  @media print {
+    body > *:not(#print-area) { display: none !important; }
+    body { background: #fff; }
+    #print-area { display: block !important; }
+    #print-area h1 { font-size: 18px; margin: 0 0 4px; }
+    #print-area .meta { font-size: 12px; margin-bottom: 12px; }
+    #print-area h2 { font-size: 14px; margin: 14px 0 4px; }
+    #print-area table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    #print-area th, #print-area td { border: 1px solid #999; padding: 3px 6px; text-align: left; font-size: 11px; }
+    #print-area .foto-beweis-block { break-inside: avoid; margin-bottom: 10px; }
+    #print-area .foto-beweis { display: flex; flex-wrap: wrap; gap: 8px; }
+    #print-area .foto-beweis figure { margin: 0; width: 30%; break-inside: avoid; }
+    #print-area .foto-beweis img { width: 100%; border: 1px solid #999; }
+    #print-area .foto-beweis figcaption { font-size: 10px; text-align: center; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏗️ Baustelle Controlling</h1>
+  <nav>
+    <button class="tab active" data-page="erfassung">Tageserfassung</button>
+    <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
+    <button class="tab" data-page="auswertung">Auswertung</button>
+  </nav>
+</header>
+<main>
+  <p class="hint">Alle Daten und Fotos werden nur lokal in diesem Browser gespeichert (kein Server). PDF wird über die Druckfunktion „Als PDF speichern" erzeugt – funktioniert auch offline und auf dem Handy.</p>
+
+  <section id="page-erfassung" class="page active">
+    <h2>Tageserfassung</h2>
+    <div class="form-inline">
+      <label>Datum: <input type="date" id="erfassung-datum" /></label>
+    </div>
+    <div id="erfassung-error" class="error"></div>
+    <div id="erfassung-status" class="status"></div>
+    <div id="erfassung-content"></div>
+  </section>
+
+  <section id="page-bauabschnitte" class="page">
+    <h2>Bauabschnitte verwalten</h2>
+    <div id="bauabschnitte-error" class="error"></div>
+    <form class="form-inline" id="bauabschnitt-form">
+      <input id="ba-name" placeholder="Name (z.B. Abschnitt A - Rohbau)" required />
+      <input id="ba-beschreibung" placeholder="Beschreibung (optional)" />
+      <button type="submit" id="ba-submit-btn">Hinzufügen</button>
+      <button type="button" class="secondary" id="ba-cancel-btn" style="display:none">Abbrechen</button>
+    </form>
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Beschreibung</th><th></th></tr></thead>
+      <tbody id="bauabschnitte-liste"></tbody>
+    </table>
+  </section>
+
+  <section id="page-auswertung" class="page">
+    <h2>Auswertung der Leistung</h2>
+    <form class="form-inline" id="auswertung-form">
+      <label>Von: <input type="date" id="aw-von" /></label>
+      <label>Bis: <input type="date" id="aw-bis" /></label>
+      <button type="submit">Aktualisieren</button>
+    </form>
+    <div id="auswertung-content"></div>
+  </section>
+</main>
+
+<div id="print-area"></div>
+
+<script>
+(function () {
+  const STORAGE_KEY = "baustelle-controlling-data";
+
+  function ladeDaten() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return { bauabschnitte: [], einsaetze: [], nextBaId: 1, nextEinsatzId: 1 };
+  }
+
+  function speicherDaten() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  let state = ladeDaten();
+
+  function heute() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function vorTagen(n) {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : String(str);
+    return div.innerHTML;
+  }
+
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---- Foto-Speicher (IndexedDB) ----
+  let fotoDbPromise = null;
+  function fotoDb() {
+    if (!fotoDbPromise) {
+      fotoDbPromise = new Promise((resolve, reject) => {
+        if (!("indexedDB" in window) || !window.indexedDB) {
+          reject(new Error("IndexedDB nicht verfügbar"));
+          return;
+        }
+        const req = indexedDB.open("baustelle-fotos", 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains("fotos")) {
+            const store = db.createObjectStore("fotos", { keyPath: "id", autoIncrement: true });
+            store.createIndex("einsatz_id", "einsatz_id", { unique: false });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error("Fotospeicher konnte nicht geöffnet werden"));
+      });
+    }
+    return fotoDbPromise;
+  }
+
+  function fotosFuerEinsatz(einsatzId) {
+    return fotoDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction("fotos", "readonly");
+      const req = tx.objectStore("fotos").index("einsatz_id").getAll(einsatzId);
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    }));
+  }
+
+  function anzahlFotos(einsatzId) {
+    return fotoDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction("fotos", "readonly");
+      const req = tx.objectStore("fotos").index("einsatz_id").count(einsatzId);
+      req.onsuccess = () => resolve(req.result || 0);
+      req.onerror = () => reject(req.error);
+    }));
+  }
+
+  function fotoHinzufuegen(einsatzId, dataUrl) {
+    return fotoDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction("fotos", "readwrite");
+      const req = tx.objectStore("fotos").add({
+        einsatz_id: einsatzId,
+        dataUrl: dataUrl,
+        erstellt: new Date().toISOString(),
+      });
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    }));
+  }
+
+  function fotoLoeschen(id) {
+    return fotoDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction("fotos", "readwrite");
+      const req = tx.objectStore("fotos").delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    }));
+  }
+
+  function fotosLoeschenFuerEinsatz(einsatzId) {
+    return fotosFuerEinsatz(einsatzId)
+      .then((fotos) => Promise.all(fotos.map((f) => fotoLoeschen(f.id))))
+      .catch(() => {});
+  }
+
+  // Bild verkleinern & als komprimiertes JPEG (data-URL) zurueckgeben
+  function komprimiereBild(file, maxDim, quality) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.width, h = img.height;
+          if (w >= h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else if (h > w && h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          try { resolve(canvas.toDataURL("image/jpeg", quality)); }
+          catch (e) { reject(e); }
+        };
+        img.onerror = () => reject(new Error("Bild konnte nicht geladen werden"));
+        img.src = reader.result;
+      };
+      reader.onerror = () => reject(new Error("Datei konnte nicht gelesen werden"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ---- Tabs ----
+  document.querySelectorAll("nav button.tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("nav button.tab").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("page-" + btn.dataset.page).classList.add("active");
+      if (btn.dataset.page === "auswertung") renderAuswertung();
+      if (btn.dataset.page === "erfassung") renderErfassung();
+    });
+  });
+
+  // ---- Bauabschnitte ----
+  let editId = null;
+
+  function renderBauabschnitte() {
+    const tbody = document.getElementById("bauabschnitte-liste");
+    if (state.bauabschnitte.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" class="empty">Noch keine Bauabschnitte angelegt.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = state.bauabschnitte
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(
+        (b) => `
+      <tr>
+        <td>${escapeHtml(b.name)}</td>
+        <td>${escapeHtml(b.beschreibung || "")}</td>
+        <td class="actions">
+          <button data-edit="${b.id}">Bearbeiten</button>
+          <button class="danger" data-delete="${b.id}">Löschen</button>
+        </td>
+      </tr>`
+      )
+      .join("");
+
+    tbody.querySelectorAll("[data-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const b = state.bauabschnitte.find((x) => x.id === Number(btn.dataset.edit));
+        if (!b) return;
+        editId = b.id;
+        document.getElementById("ba-name").value = b.name;
+        document.getElementById("ba-beschreibung").value = b.beschreibung || "";
+        document.getElementById("ba-submit-btn").textContent = "Speichern";
+        document.getElementById("ba-cancel-btn").style.display = "inline-block";
+      });
+    });
+    tbody.querySelectorAll("[data-delete]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!confirm("Bauabschnitt wirklich löschen? Zugehörige Einsätze und Fotos werden mit gelöscht.")) return;
+        const id = Number(btn.dataset.delete);
+        const betroffeneEinsaetze = state.einsaetze.filter((x) => x.bauabschnitt_id === id).map((x) => x.id);
+        state.bauabschnitte = state.bauabschnitte.filter((x) => x.id !== id);
+        state.einsaetze = state.einsaetze.filter((x) => x.bauabschnitt_id !== id);
+        speicherDaten();
+        betroffeneEinsaetze.forEach((eid) => { offeneFotos.delete(eid); fotosLoeschenFuerEinsatz(eid); });
+        renderBauabschnitte();
+        renderErfassung();
+      });
+    });
+  }
+
+  document.getElementById("bauabschnitt-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById("bauabschnitte-error");
+    errEl.textContent = "";
+    const name = document.getElementById("ba-name").value.trim();
+    const beschreibung = document.getElementById("ba-beschreibung").value.trim();
+    if (!name) {
+      errEl.textContent = "Name ist erforderlich";
+      return;
+    }
+    if (editId) {
+      const b = state.bauabschnitte.find((x) => x.id === editId);
+      if (b) {
+        b.name = name;
+        b.beschreibung = beschreibung;
+      }
+      editId = null;
+      document.getElementById("ba-submit-btn").textContent = "Hinzufügen";
+      document.getElementById("ba-cancel-btn").style.display = "none";
+    } else {
+      state.bauabschnitte.push({ id: state.nextBaId++, name, beschreibung });
+    }
+    speicherDaten();
+    document.getElementById("bauabschnitt-form").reset();
+    renderBauabschnitte();
+    renderErfassung();
+  });
+
+  document.getElementById("ba-cancel-btn").addEventListener("click", () => {
+    editId = null;
+    document.getElementById("bauabschnitt-form").reset();
+    document.getElementById("ba-submit-btn").textContent = "Hinzufügen";
+    document.getElementById("ba-cancel-btn").style.display = "none";
+  });
+
+  // ---- Tageserfassung ----
+  const offeneFotos = new Set(); // einsatz-ids, deren Fotopanel offen ist
+
+  const erfassungDatumInput = document.getElementById("erfassung-datum");
+  erfassungDatumInput.value = heute();
+  erfassungDatumInput.addEventListener("change", () => { offeneFotos.clear(); renderErfassung(); });
+
+  function findEinsatz(datum, bauabschnittId) {
+    return state.einsaetze.find((e) => e.datum === datum && e.bauabschnitt_id === bauabschnittId);
+  }
+
+  function renderFotoGrid(grid, einsatzId) {
+    return fotosFuerEinsatz(einsatzId).then((fotos) => {
+      if (!fotos || fotos.length === 0) {
+        grid.innerHTML = '<span class="hint">Noch keine Fotos für diesen Tag.</span>';
+        return;
+      }
+      grid.innerHTML = fotos
+        .map(
+          (f) => `
+        <div class="foto-thumb">
+          <a href="${f.dataUrl}" target="_blank" rel="noreferrer"><img src="${f.dataUrl}" alt="Beweisfoto" /></a>
+          <button class="danger foto-del" data-foto-id="${f.id}">×</button>
+        </div>`
+        )
+        .join("");
+      grid.querySelectorAll(".foto-del").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          fotoLoeschen(Number(btn.dataset.fotoId))
+            .then(() => renderFotoGrid(grid, einsatzId))
+            .then(() => anzahlFotos(einsatzId))
+            .then((n) => {
+              const countEl = document.querySelector('[data-count-einsatz="' + einsatzId + '"]');
+              if (countEl) countEl.textContent = n;
+            });
+        });
+      });
+    }).catch(() => {
+      grid.innerHTML = '<span class="hint">Fotospeicher in diesem Browser nicht verfügbar.</span>';
+    });
+  }
+
+  function aktualisiereFotoAnzeige() {
+    document.querySelectorAll("#erfassung-content [data-count-einsatz]").forEach((el) => {
+      const eid = Number(el.dataset.countEinsatz);
+      anzahlFotos(eid).then((n) => { el.textContent = n; }).catch(() => { el.textContent = "0"; });
+    });
+    document.querySelectorAll("#erfassung-content [data-grid-einsatz]").forEach((grid) => {
+      renderFotoGrid(grid, Number(grid.dataset.gridEinsatz));
+    });
+  }
+
+  function renderErfassung(behalteStatus) {
+    const datum = erfassungDatumInput.value || heute();
+    const content = document.getElementById("erfassung-content");
+    document.getElementById("erfassung-error").textContent = "";
+    if (!behalteStatus) document.getElementById("erfassung-status").textContent = "";
+
+    if (state.bauabschnitte.length === 0) {
+      content.innerHTML = '<p class="empty">Noch keine Bauabschnitte angelegt. Bitte zuerst unter "Bauabschnitte" einen Bauabschnitt anlegen.</p>';
+      return;
+    }
+
+    let gesamt = 0;
+    const rows = state.bauabschnitte
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((b) => {
+        const e = findEinsatz(datum, b.id);
+        const anzahl = e ? e.anzahl_arbeiter : "";
+        const stunden = e ? e.stunden : "";
+        const notiz = e ? e.notiz || "" : "";
+        const mannstunden = e ? e.anzahl_arbeiter * e.stunden : 0;
+        gesamt += mannstunden;
+
+        const fotoCell = e
+          ? `<button class="secondary foto-toggle" data-einsatz="${e.id}">📷 <span class="foto-count" data-count-einsatz="${e.id}">0</span></button>`
+          : '<span class="hint">erst speichern</span>';
+
+        let html = `
+        <tr data-ba="${b.id}">
+          <td>${escapeHtml(b.name)}</td>
+          <td><input type="number" min="0" class="in-anzahl" value="${anzahl}" /></td>
+          <td><input type="number" min="0" step="0.25" class="in-stunden" value="${stunden}" /></td>
+          <td class="mannstunden out-mannstunden">${mannstunden.toFixed(2)}</td>
+          <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(notiz)}" /></td>
+          <td>${fotoCell}</td>
+          <td class="actions">
+            <button data-save="${b.id}">Speichern</button>
+            ${e ? `<button class="danger" data-delete-einsatz="${b.id}">Löschen</button>` : ""}
+          </td>
+        </tr>`;
+
+        if (e && offeneFotos.has(e.id)) {
+          html += `
+        <tr class="foto-row">
+          <td colspan="7">
+            <div class="foto-panel">
+              <label class="foto-upload-btn">Foto aufnehmen / hochladen
+                <input type="file" accept="image/*" capture="environment" multiple class="foto-input" data-einsatz="${e.id}" />
+              </label>
+              <div class="error" data-fehler-einsatz="${e.id}"></div>
+              <div class="foto-grid" data-grid-einsatz="${e.id}">Lädt…</div>
+            </div>
+          </td>
+        </tr>`;
+        }
+        return html;
+      })
+      .join("");
+
+    content.innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Notiz</th><th>Fotos</th><th></th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3"><strong>Gesamt Mannstunden am ${escapeHtml(datum)}</strong></td>
+            <td class="mannstunden"><strong>${gesamt.toFixed(2)}</strong></td>
+            <td colspan="3"></td>
+          </tr>
+        </tfoot>
+      </table>`;
+
+    content.querySelectorAll("tr[data-ba] .in-anzahl, tr[data-ba] .in-stunden").forEach((input) => {
+      input.addEventListener("input", () => {
+        const tr = input.closest("tr");
+        const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
+        const stunden = Number(tr.querySelector(".in-stunden").value || 0);
+        tr.querySelector(".out-mannstunden").textContent = (anzahl * stunden).toFixed(2);
+      });
+    });
+
+    content.querySelectorAll("[data-save]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const baId = Number(btn.dataset.save);
+        const tr = btn.closest("tr");
+        const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
+        const stunden = Number(tr.querySelector(".in-stunden").value || 0);
+        const notiz = tr.querySelector(".in-notiz").value;
+        const errEl = document.getElementById("erfassung-error");
+        const statusEl = document.getElementById("erfassung-status");
+        errEl.textContent = "";
+        if (anzahl < 0 || stunden < 0) {
+          errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
+          return;
+        }
+        let e = findEinsatz(datum, baId);
+        if (e) {
+          e.anzahl_arbeiter = anzahl;
+          e.stunden = stunden;
+          e.notiz = notiz;
+        } else {
+          state.einsaetze.push({
+            id: state.nextEinsatzId++,
+            datum,
+            bauabschnitt_id: baId,
+            anzahl_arbeiter: anzahl,
+            stunden,
+            notiz,
+          });
+        }
+        speicherDaten();
+        const ba = state.bauabschnitte.find((x) => x.id === baId);
+        statusEl.textContent = `Gespeichert: ${ba ? ba.name : ""}`;
+        renderErfassung(true);
+      });
+    });
+
+    content.querySelectorAll("[data-delete-einsatz]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const baId = Number(btn.dataset.deleteEinsatz);
+        const e = findEinsatz(datum, baId);
+        if (e) { offeneFotos.delete(e.id); fotosLoeschenFuerEinsatz(e.id); }
+        state.einsaetze = state.einsaetze.filter((x) => !(x.datum === datum && x.bauabschnitt_id === baId));
+        speicherDaten();
+        renderErfassung();
+      });
+    });
+
+    content.querySelectorAll(".foto-toggle").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const eid = Number(btn.dataset.einsatz);
+        if (offeneFotos.has(eid)) offeneFotos.delete(eid);
+        else offeneFotos.add(eid);
+        renderErfassung(true);
+      });
+    });
+
+    content.querySelectorAll(".foto-input").forEach((input) => {
+      input.addEventListener("change", () => {
+        const eid = Number(input.dataset.einsatz);
+        const fehlerEl = document.querySelector('[data-fehler-einsatz="' + eid + '"]');
+        const grid = document.querySelector('[data-grid-einsatz="' + eid + '"]');
+        if (fehlerEl) fehlerEl.textContent = "";
+        const files = Array.from(input.files || []);
+        input.value = "";
+        if (files.length === 0) return;
+        if (grid) grid.innerHTML = '<span class="hint">Speichere Fotos…</span>';
+
+        let kette = Promise.resolve();
+        files.forEach((file) => {
+          if (!file.type || !file.type.startsWith("image/")) return;
+          kette = kette
+            .then(() => komprimiereBild(file, 1280, 0.7))
+            .then((dataUrl) => fotoHinzufuegen(eid, dataUrl));
+        });
+        kette
+          .then(() => { if (grid) return renderFotoGrid(grid, eid); })
+          .then(() => anzahlFotos(eid))
+          .then((n) => {
+            const countEl = document.querySelector('[data-count-einsatz="' + eid + '"]');
+            if (countEl) countEl.textContent = n;
+          })
+          .catch((err) => {
+            if (fehlerEl) fehlerEl.textContent = "Fehler beim Speichern (Speicher evtl. voll): " + (err && err.message ? err.message : "unbekannt");
+            if (grid) renderFotoGrid(grid, eid);
+          });
+      });
+    });
+
+    aktualisiereFotoAnzeige();
+  }
+
+  // ---- Auswertung ----
+  const awVon = document.getElementById("aw-von");
+  const awBis = document.getElementById("aw-bis");
+  awVon.value = vorTagen(6);
+  awBis.value = heute();
+
+  document.getElementById("auswertung-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    renderAuswertung();
+  });
+
+  function berechneAuswertung(von, bis) {
+    const eintraege = state.einsaetze
+      .filter((e) => e.datum >= von && e.datum <= bis)
+      .map((e) => {
+        const ba = state.bauabschnitte.find((b) => b.id === e.bauabschnitt_id);
+        return { ...e, bauabschnitt_name: ba ? ba.name : "(gelöscht)", mannstunden: e.anzahl_arbeiter * e.stunden };
+      })
+      .sort((a, b) => (a.datum + a.bauabschnitt_name).localeCompare(b.datum + b.bauabschnitt_name));
+
+    const proTagMap = {};
+    const proBaMap = {};
+    let gesamt = 0;
+    for (const e of eintraege) {
+      proTagMap[e.datum] = (proTagMap[e.datum] || 0) + e.mannstunden;
+      if (!proBaMap[e.bauabschnitt_id]) {
+        proBaMap[e.bauabschnitt_id] = { name: e.bauabschnitt_name, mannstunden: 0, arbeitstage: 0 };
+      }
+      proBaMap[e.bauabschnitt_id].mannstunden += e.mannstunden;
+      proBaMap[e.bauabschnitt_id].arbeitstage += 1;
+      gesamt += e.mannstunden;
+    }
+    const proTag = Object.entries(proTagMap).map(([datum, mannstunden]) => ({ datum, mannstunden }));
+    const proBa = Object.values(proBaMap).sort((a, b) => b.mannstunden - a.mannstunden);
+    return { eintraege, proTag, proBa, gesamt };
+  }
+
+  function escapeCsv(wert) {
+    const s = String(wert == null ? "" : wert);
+    return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function exportCsv(von, bis) {
+    const { eintraege } = berechneAuswertung(von, bis);
+    const headers = ["Datum", "Bauabschnitt", "Anzahl Arbeiter", "Stunden", "Mannstunden"];
+    const zeilen = eintraege.map((e) => [e.datum, e.bauabschnitt_name, e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2)]);
+    const csv = [headers, ...zeilen].map((r) => r.map(escapeCsv).join(";")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    triggerDownload(blob, `Auswertung_${von}_bis_${bis}.csv`);
+  }
+
+  async function exportPdf(von, bis, btn) {
+    const { eintraege, proTag, proBa, gesamt } = berechneAuswertung(von, bis);
+    const printArea = document.getElementById("print-area");
+
+    const urspruenglicherText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = "Fotos werden geladen…"; }
+
+    let fotosProEinsatz = [];
+    try {
+      fotosProEinsatz = await Promise.all(
+        eintraege.map((e) => fotosFuerEinsatz(e.id).then((fotos) => ({ eintrag: e, fotos })).catch(() => ({ eintrag: e, fotos: [] })))
+      );
+    } catch (e) {
+      fotosProEinsatz = eintraege.map((e) => ({ eintrag: e, fotos: [] }));
+    }
+    const mitFotos = fotosProEinsatz.filter((x) => x.fotos && x.fotos.length > 0);
+
+    printArea.innerHTML = `
+      <h1>Baustelle Controlling – Auswertung</h1>
+      <div class="meta">Zeitraum: ${escapeHtml(von)} bis ${escapeHtml(bis)}<br>Gesamt Mannstunden: <strong>${gesamt.toFixed(2)}</strong></div>
+      <h2>Mannstunden pro Tag</h2>
+      <table><thead><tr><th>Tag</th><th>Mannstunden</th></tr></thead><tbody>
+        ${proTag.length ? proTag.map((t) => `<tr><td>${escapeHtml(t.datum)}</td><td>${t.mannstunden.toFixed(2)}</td></tr>`).join("") : '<tr><td colspan="2">Keine Einträge</td></tr>'}
+      </tbody></table>
+      <h2>Mannstunden pro Bauabschnitt</h2>
+      <table><thead><tr><th>Bauabschnitt</th><th>Mannstunden</th><th>Erfasste Tage</th></tr></thead><tbody>
+        ${proBa.length ? proBa.map((b) => `<tr><td>${escapeHtml(b.name)}</td><td>${b.mannstunden.toFixed(2)}</td><td>${b.arbeitstage}</td></tr>`).join("") : '<tr><td colspan="3">Keine Einträge</td></tr>'}
+      </tbody></table>
+      <h2>Alle Einträge</h2>
+      <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th></tr></thead><tbody>
+        ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td></tr>`).join("") : '<tr><td colspan="5">Keine Einträge</td></tr>'}
+      </tbody></table>
+      ${
+        mitFotos.length
+          ? `<h2>Beweisfotos</h2>` +
+            mitFotos
+              .map(
+                ({ eintrag, fotos }) => `
+        <div class="foto-beweis-block">
+          <p><strong>${escapeHtml(eintrag.datum)} – ${escapeHtml(eintrag.bauabschnitt_name)}</strong></p>
+          <div class="foto-beweis">
+            ${fotos.map((f, i) => `<figure><img src="${f.dataUrl}" alt="Beweisfoto" /><figcaption>Foto ${i + 1}</figcaption></figure>`).join("")}
+          </div>
+        </div>`
+              )
+              .join("")
+          : ""
+      }`;
+
+    if (btn) { btn.disabled = false; btn.textContent = urspruenglicherText; }
+    window.print();
+  }
+
+  window.addEventListener("afterprint", () => {
+    const printArea = document.getElementById("print-area");
+    if (printArea) printArea.innerHTML = "";
+  });
+
+  function renderAuswertung() {
+    const von = awVon.value;
+    const bis = awBis.value;
+    const content = document.getElementById("auswertung-content");
+    const { eintraege, proTag, proBa, gesamt } = berechneAuswertung(von, bis);
+    const maxTag = Math.max(1, ...proTag.map((t) => t.mannstunden));
+    const maxBa = Math.max(1, ...proBa.map((b) => b.mannstunden));
+
+    content.innerHTML = `
+      <div class="export-buttons">
+        <button type="button" id="aw-export-pdf">Als PDF speichern (Drucken)</button>
+        <button type="button" id="aw-export-csv">Als CSV exportieren (Excel)</button>
+      </div>
+
+      <p class="summary">Gesamt im Zeitraum: <strong>${gesamt.toFixed(2)} Mannstunden</strong></p>
+
+      <h3>Mannstunden pro Tag</h3>
+      ${
+        proTag.length === 0
+          ? '<p class="empty">Keine Einträge im gewählten Zeitraum.</p>'
+          : `<table class="data-table chart-table"><tbody>${proTag
+              .map(
+                (t) => `
+            <tr>
+              <td class="chart-label">${escapeHtml(t.datum)}</td>
+              <td class="chart-cell">
+                <div class="bar" style="width:${(t.mannstunden / maxTag) * 100}%"></div>
+                <span>${t.mannstunden.toFixed(2)}</span>
+              </td>
+            </tr>`
+              )
+              .join("")}</tbody></table>`
+      }
+
+      <h3>Mannstunden pro Bauabschnitt</h3>
+      ${
+        proBa.length === 0
+          ? '<p class="empty">Keine Einträge im gewählten Zeitraum.</p>'
+          : `<table class="data-table chart-table">
+              <thead><tr><th>Bauabschnitt</th><th>Mannstunden</th><th>Erfasste Tage</th></tr></thead>
+              <tbody>${proBa
+                .map(
+                  (b) => `
+                <tr>
+                  <td>${escapeHtml(b.name)}</td>
+                  <td class="chart-cell">
+                    <div class="bar" style="width:${(b.mannstunden / maxBa) * 100}%"></div>
+                    <span>${b.mannstunden.toFixed(2)}</span>
+                  </td>
+                  <td>${b.arbeitstage}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+            </table>`
+      }
+
+      <h3>Alle Einträge</h3>
+      <table class="data-table">
+        <thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th></tr></thead>
+        <tbody>
+          ${
+            eintraege.length === 0
+              ? '<tr><td colspan="5" class="empty">Keine Einträge im gewählten Zeitraum.</td></tr>'
+              : eintraege
+                  .map(
+                    (e) => `
+              <tr>
+                <td>${escapeHtml(e.datum)}</td>
+                <td>${escapeHtml(e.bauabschnitt_name)}</td>
+                <td>${e.anzahl_arbeiter}</td>
+                <td>${e.stunden}</td>
+                <td>${e.mannstunden.toFixed(2)}</td>
+              </tr>`
+                  )
+                  .join("")
+          }
+        </tbody>
+      </table>`;
+
+    const pdfBtn = document.getElementById("aw-export-pdf");
+    const csvBtn = document.getElementById("aw-export-csv");
+    if (pdfBtn) pdfBtn.addEventListener("click", () => exportPdf(von, bis, pdfBtn));
+    if (csvBtn) csvBtn.addEventListener("click", () => exportCsv(von, bis));
+  }
+
+  // ---- Initial render ----
+  renderBauabschnitte();
+  renderErfassung();
+})();
+</script>
+</body>
+</html>
