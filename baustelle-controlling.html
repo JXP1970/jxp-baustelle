@@ -87,6 +87,8 @@
     #print-area .foto-beweis figcaption { font-size: 10px; text-align: center; }
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 </head>
 <body>
 <header>
@@ -127,6 +129,15 @@
 
   <section id="page-auswertung" class="page">
     <h2>Auswertung der Leistung</h2>
+    <div id="backup-section">
+      <div class="export-buttons">
+        <button type="button" id="backup-export-btn">💾 Daten sichern (ZIP)</button>
+        <button type="button" id="backup-import-btn">📂 Daten wiederherstellen</button>
+        <input type="file" id="backup-import-input" accept=".zip" style="display:none;" />
+      </div>
+      <div id="backup-status" class="status" style="display:none; margin-bottom:1rem;"></div>
+      <div id="backup-error" class="error" style="margin-bottom:1rem;"></div>
+    </div>
     <form class="form-inline" id="auswertung-form">
       <label>Von: <input type="date" id="aw-von" /></label>
       <label>Bis: <input type="date" id="aw-bis" /></label>
@@ -709,6 +720,120 @@
   window.addEventListener("afterprint", () => {
     const printArea = document.getElementById("print-area");
     if (printArea) printArea.innerHTML = "";
+  });
+
+  // ---- Backup / Export / Import ----
+  async function exportAsZip() {
+    const statusEl = document.getElementById("backup-status");
+    const errorEl = document.getElementById("backup-error");
+    statusEl.style.display = "none";
+    errorEl.textContent = "";
+
+    try {
+      const zip = new JSZip();
+      zip.file("data.json", JSON.stringify(state, null, 2));
+
+      const db = await fotoDb();
+      const allFotos = await new Promise((resolve, reject) => {
+        const tx = db.transaction("fotos", "readonly");
+        const req = tx.objectStore("fotos").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+
+      for (const foto of allFotos) {
+        const fileName = `fotos/${foto.einsatz_id}_${foto.id}.jpg`;
+        zip.file(fileName, foto.dataUrl.split(",")[1], { base64: true });
+      }
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const datum = new Date().toISOString().slice(0, 10);
+      triggerDownload(blob, `Baustelle-Backup_${datum}.zip`);
+
+      statusEl.textContent = `✓ Sicherung erfolgreich erstellt (${allFotos.length} Fotos)`;
+      statusEl.style.display = "block";
+    } catch (err) {
+      errorEl.textContent = "Fehler beim Exportieren: " + (err && err.message ? err.message : "unbekannt");
+    }
+  }
+
+  async function importFromZip(file) {
+    const statusEl = document.getElementById("backup-status");
+    const errorEl = document.getElementById("backup-error");
+    statusEl.style.display = "none";
+    errorEl.textContent = "";
+
+    try {
+      const zip = await JSZip.loadAsync(file);
+
+      const dataFile = zip.file("data.json");
+      if (!dataFile) {
+        errorEl.textContent = "Ungültiges Backup: data.json nicht gefunden";
+        return;
+      }
+
+      const dataJson = await dataFile.async("string");
+      const importedState = JSON.parse(dataJson);
+
+      if (!importedState.bauabschnitte || !importedState.einsaetze) {
+        errorEl.textContent = "Ungültiges Backup: Struktur fehlerhaft";
+        return;
+      }
+
+      state = importedState;
+      speicherDaten();
+
+      const db = await fotoDb();
+      const fotoFiles = Object.keys(zip.files).filter(name => name.startsWith("fotos/"));
+      let importedFotoCount = 0;
+
+      for (const fotoPath of fotoFiles) {
+        try {
+          const fotoData = await zip.file(fotoPath).async("base64");
+          const dataUrl = "data:image/jpeg;base64," + fotoData;
+          const pathParts = fotoPath.split("/")[1].split("_");
+          const einsatzId = Number(pathParts[0]);
+
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction("fotos", "readwrite");
+            const req = tx.objectStore("fotos").add({
+              einsatz_id: einsatzId,
+              dataUrl: dataUrl,
+              erstellt: new Date().toISOString(),
+            });
+            req.onsuccess = () => { importedFotoCount++; resolve(); };
+            req.onerror = () => reject(req.error);
+          });
+        } catch (e) {
+          console.warn("Fehler beim Import von " + fotoPath, e);
+        }
+      }
+
+      statusEl.textContent = `✓ Wiedhergestellt: ${state.bauabschnitte.length} Abschnitte, ${state.einsaetze.length} Einsätze, ${importedFotoCount} Fotos`;
+      statusEl.style.display = "block";
+
+      renderBauabschnitte();
+      renderErfassung();
+      if (document.getElementById("page-auswertung").classList.contains("active")) {
+        renderAuswertung();
+      }
+
+      offeneFotos.clear();
+    } catch (err) {
+      errorEl.textContent = "Fehler beim Importieren: " + (err && err.message ? err.message : "unbekannt");
+    }
+  }
+
+  document.getElementById("backup-export-btn").addEventListener("click", () => exportAsZip());
+  document.getElementById("backup-import-btn").addEventListener("click", () => {
+    document.getElementById("backup-import-input").click();
+  });
+  document.getElementById("backup-import-input").addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      importFromZip(file);
+      e.target.value = "";
+    }
   });
 
   function renderAuswertung() {
