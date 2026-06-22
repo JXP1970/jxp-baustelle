@@ -467,6 +467,7 @@
         const e = findEinsatz(datum, b.id);
         const anzahl = e ? e.anzahl_arbeiter : "";
         const stunden = e ? e.stunden : "";
+        const taetigkeit = e ? e.taetigkeit || "" : "";
         const notiz = e ? e.notiz || "" : "";
         const mannstunden = e ? e.anzahl_arbeiter * e.stunden : 0;
         gesamt += mannstunden;
@@ -481,6 +482,7 @@
           <td><input type="number" min="0" class="in-anzahl" value="${anzahl}" /></td>
           <td><input type="number" min="0" step="0.25" class="in-stunden" value="${stunden}" /></td>
           <td class="mannstunden out-mannstunden">${mannstunden.toFixed(2)}</td>
+          <td><input class="in-taetigkeit" placeholder="z.B. Mauern, Verputzen" value="${escapeHtml(taetigkeit)}" /></td>
           <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(notiz)}" /></td>
           <td>${fotoCell}</td>
           <td class="actions">
@@ -492,7 +494,7 @@
         if (e && offeneFotos.has(e.id)) {
           html += `
         <tr class="foto-row">
-          <td colspan="7">
+          <td colspan="8">
             <div class="foto-panel">
               <label class="foto-upload-btn">Foto aufnehmen / hochladen
                 <input type="file" accept="image/*" capture="environment" multiple class="foto-input" data-einsatz="${e.id}" />
@@ -510,14 +512,14 @@
     content.innerHTML = `
       <table class="data-table">
         <thead>
-          <tr><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Notiz</th><th>Fotos</th><th></th></tr>
+          <tr><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th><th>Fotos</th><th></th></tr>
         </thead>
         <tbody>${rows}</tbody>
         <tfoot>
           <tr>
             <td colspan="3"><strong>Gesamt Mannstunden am ${escapeHtml(datum)}</strong></td>
             <td class="mannstunden"><strong>${gesamt.toFixed(2)}</strong></td>
-            <td colspan="3"></td>
+            <td colspan="4"></td>
           </tr>
         </tfoot>
       </table>`;
@@ -537,6 +539,7 @@
         const tr = btn.closest("tr");
         const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
         const stunden = Number(tr.querySelector(".in-stunden").value || 0);
+        const taetigkeit = tr.querySelector(".in-taetigkeit").value;
         const notiz = tr.querySelector(".in-notiz").value;
         const errEl = document.getElementById("erfassung-error");
         const statusEl = document.getElementById("erfassung-status");
@@ -549,6 +552,7 @@
         if (e) {
           e.anzahl_arbeiter = anzahl;
           e.stunden = stunden;
+          e.taetigkeit = taetigkeit;
           e.notiz = notiz;
         } else {
           state.einsaetze.push({
@@ -557,6 +561,7 @@
             bauabschnitt_id: baId,
             anzahl_arbeiter: anzahl,
             stunden,
+            taetigkeit,
             notiz,
           });
         }
@@ -666,8 +671,8 @@
 
   function exportCsv(von, bis) {
     const { eintraege } = berechneAuswertung(von, bis);
-    const headers = ["Datum", "Bauabschnitt", "Anzahl Arbeiter", "Stunden", "Mannstunden"];
-    const zeilen = eintraege.map((e) => [e.datum, e.bauabschnitt_name, e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2)]);
+    const headers = ["Datum", "Bauabschnitt", "Anzahl Arbeiter", "Stunden", "Mannstunden", "Tätigkeit", "Notiz"];
+    const zeilen = eintraege.map((e) => [e.datum, e.bauabschnitt_name, e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2), e.taetigkeit || "", e.notiz || ""]);
     const csv = [headers, ...zeilen].map((r) => r.map(escapeCsv).join(";")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     triggerDownload(blob, `Auswertung_${von}_bis_${bis}.csv`);
@@ -702,8 +707,8 @@
         ${proBa.length ? proBa.map((b) => `<tr><td>${escapeHtml(b.name)}</td><td>${b.mannstunden.toFixed(2)}</td><td>${b.arbeitstage}</td></tr>`).join("") : '<tr><td colspan="3">Keine Einträge</td></tr>'}
       </tbody></table>
       <h2>Alle Einträge</h2>
-      <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th></tr></thead><tbody>
-        ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td></tr>`).join("") : '<tr><td colspan="5">Keine Einträge</td></tr>'}
+      <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead><tbody>
+        ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td><td>${escapeHtml(e.taetigkeit || "")}</td><td>${escapeHtml(e.notiz || "")}</td></tr>`).join("") : '<tr><td colspan="7">Keine Einträge</td></tr>'}
       </tbody></table>
       ${
         mitFotos.length
@@ -996,11 +1001,11 @@
 
       <h3>Alle Einträge</h3>
       <table class="data-table">
-        <thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th></tr></thead>
+        <thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead>
         <tbody>
           ${
             eintraege.length === 0
-              ? '<tr><td colspan="5" class="empty">Keine Einträge im gewählten Zeitraum.</td></tr>'
+              ? '<tr><td colspan="7" class="empty">Keine Einträge im gewählten Zeitraum.</td></tr>'
               : eintraege
                   .map(
                     (e) => `
@@ -1010,6 +1015,8 @@
                 <td>${e.anzahl_arbeiter}</td>
                 <td>${e.stunden}</td>
                 <td>${e.mannstunden.toFixed(2)}</td>
+                <td>${escapeHtml(e.taetigkeit || "")}</td>
+                <td>${escapeHtml(e.notiz || "")}</td>
               </tr>`
                   )
                   .join("")
