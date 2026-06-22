@@ -398,10 +398,11 @@
 
   // ---- Tageserfassung ----
   const offeneFotos = new Set(); // einsatz-ids, deren Fotopanel offen ist
+  let bearbeitungAktiv = false; // true, sobald ungespeicherte Eingaben vorliegen -> Sync pausiert
 
   const erfassungDatumInput = document.getElementById("erfassung-datum");
   erfassungDatumInput.value = heute();
-  erfassungDatumInput.addEventListener("change", () => { offeneFotos.clear(); renderErfassung(); });
+  erfassungDatumInput.addEventListener("change", () => { bearbeitungAktiv = false; offeneFotos.clear(); renderErfassung(); });
 
   function findEinsatz(datum, bauabschnittId) {
     return state.einsaetze.find((e) => e.datum === datum && e.bauabschnitt_id === bauabschnittId);
@@ -524,6 +525,11 @@
         </tfoot>
       </table>`;
 
+    // Sobald in einem Erfassungsfeld getippt wird: Sync pausieren, bis gespeichert.
+    content.querySelectorAll("tr[data-ba] input").forEach((input) => {
+      input.addEventListener("input", () => { bearbeitungAktiv = true; });
+    });
+
     content.querySelectorAll("tr[data-ba] .in-anzahl, tr[data-ba] .in-stunden").forEach((input) => {
       input.addEventListener("input", () => {
         const tr = input.closest("tr");
@@ -565,6 +571,7 @@
             notiz,
           });
         }
+        bearbeitungAktiv = false;
         speicherDaten();
         const ba = state.bauabschnitte.find((x) => x.id === baId);
         statusEl.textContent = `Gespeichert: ${ba ? ba.name : ""}`;
@@ -578,6 +585,7 @@
         const e = findEinsatz(datum, baId);
         if (e) { offeneFotos.delete(e.id); fotosLoeschenFuerEinsatz(e.id); }
         state.einsaetze = state.einsaetze.filter((x) => !(x.datum === datum && x.bauabschnitt_id === baId));
+        bearbeitungAktiv = false;
         speicherDaten();
         renderErfassung();
       });
@@ -889,8 +897,10 @@
 
   async function syncFromServer() {
     if (!serverUrl) return;
-    // Sync pausieren, solange der Benutzer gerade etwas eintippt –
-    // sonst würde die Tabelle neu aufgebaut und die Eingabe verworfen.
+    // Sync pausieren, solange ungespeicherte Eingaben vorliegen oder der
+    // Benutzer gerade ein Feld bearbeitet – sonst würde die Tabelle neu
+    // aufgebaut und die Eingabe verworfen.
+    if (bearbeitungAktiv) return;
     const aktiv = document.activeElement;
     if (aktiv && (aktiv.tagName === "INPUT" || aktiv.tagName === "TEXTAREA")) {
       return;
