@@ -92,7 +92,7 @@
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v2.1</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
+  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v2.2</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
@@ -242,13 +242,22 @@
   function fotoHinzufuegen(einsatzId, dataUrl) {
     return fotoDb().then((db) => new Promise((resolve, reject) => {
       const tx = db.transaction("fotos", "readwrite");
-      const req = tx.objectStore("fotos").add({
+      const store = tx.objectStore("fotos");
+      const req = store.add({
         einsatz_id: einsatzId,
         dataUrl: dataUrl,
         erstellt: new Date().toISOString(),
       });
       req.onsuccess = () => {
         const fotoId = req.result;
+        // serverKey nachtragen (= Dateiname auf dem Server), damit dieses Foto
+        // beim Download-Sync nicht erneut als "neu" importiert wird.
+        const serverKey = einsatzId + "_" + fotoId;
+        const getReq = store.get(fotoId);
+        getReq.onsuccess = () => {
+          const obj = getReq.result;
+          if (obj) { obj.serverKey = serverKey; store.put(obj); }
+        };
         if (serverUrl && serverAvailable) {
           syncFotoToServer(einsatzId, fotoId, dataUrl).catch(() => {});
         }
@@ -941,6 +950,52 @@
     }
   }
 
+  // Lädt Fotos vom Server, die lokal noch nicht vorhanden sind.
+  async function syncFotosFromServer() {
+    if (!serverUrl) return;
+    try {
+      const response = await fetch(serverUrl + '/api/fotos');
+      if (!response.ok) return;
+      const serverFotos = await response.json(); // [{fileName, einsatzId, fotoId, dataUrl}]
+      const db = await fotoDb();
+
+      const lokale = await new Promise((resolve, reject) => {
+        const tx = db.transaction("fotos", "readonly");
+        const req = tx.objectStore("fotos").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+      const vorhandeneKeys = new Set(lokale.filter((f) => f.serverKey).map((f) => f.serverKey));
+
+      let neue = 0;
+      for (const sf of serverFotos) {
+        const key = String(sf.fileName).replace(/\.jpg$/i, ""); // "einsatzId_fotoId"
+        if (vorhandeneKeys.has(key)) continue;
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction("fotos", "readwrite");
+          const req = tx.objectStore("fotos").add({
+            einsatz_id: sf.einsatzId,
+            dataUrl: sf.dataUrl,
+            erstellt: new Date().toISOString(),
+            serverKey: key,
+          });
+          req.onsuccess = () => { neue++; resolve(); };
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      if (neue > 0) {
+        // Anzeige nur aktualisieren, wenn der Benutzer nicht gerade tippt.
+        const aktiv = document.activeElement;
+        const tippt = bearbeitungAktiv ||
+          (aktiv && (aktiv.tagName === "INPUT" || aktiv.tagName === "TEXTAREA"));
+        if (!tippt) aktualisiereFotoAnzeige();
+      }
+    } catch (e) {
+      console.warn('Foto-Download-Sync fehlgeschlagen:', e.message);
+    }
+  }
+
   function updateSyncStatus(text, color = '#1a7f37') {
     const el = document.getElementById("sync-status");
     if (el) {
@@ -956,7 +1011,9 @@
       if (serverAvailable) {
         updateSyncStatus('🔗 Server verbunden');
         await syncFromServer();
+        await syncFotosFromServer();
         setInterval(syncFromServer, 5000);
+        setInterval(syncFotosFromServer, 5000);
       } else {
         updateSyncStatus('⚠️ Lokal (kein Server)', '#ff9800');
       }
