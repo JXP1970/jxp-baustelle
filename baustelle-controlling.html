@@ -889,13 +889,20 @@
 
   async function syncFromServer() {
     if (!serverUrl) return;
+    // Sync pausieren, solange der Benutzer gerade etwas eintippt –
+    // sonst würde die Tabelle neu aufgebaut und die Eingabe verworfen.
+    const aktiv = document.activeElement;
+    if (aktiv && (aktiv.tagName === "INPUT" || aktiv.tagName === "TEXTAREA")) {
+      return;
+    }
     try {
       const response = await fetch(serverUrl + '/api/sync');
       if (response.ok) {
         const serverState = await response.json();
         if (JSON.stringify(state) !== JSON.stringify(serverState)) {
           state = serverState;
-          speicherDaten();
+          // Direkt in localStorage speichern, OHNE erneuten Server-Push.
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
           renderBauabschnitte();
           renderErfassung();
           if (document.getElementById("page-auswertung").classList.contains("active")) {
