@@ -92,7 +92,7 @@
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling</h1>
+  <h1>🏗️ Baustelle Controlling <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
@@ -163,6 +163,9 @@
 
   function speicherDaten() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (serverUrl && serverAvailable) {
+      syncToServer().catch(() => {});
+    }
   }
 
   let state = ladeDaten();
@@ -244,7 +247,13 @@
         dataUrl: dataUrl,
         erstellt: new Date().toISOString(),
       });
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const fotoId = req.result;
+        if (serverUrl && serverAvailable) {
+          syncFotoToServer(einsatzId, fotoId, dataUrl).catch(() => {});
+        }
+        resolve(fotoId);
+      };
       req.onerror = () => reject(req.error);
     }));
   }
@@ -835,6 +844,99 @@
       e.target.value = "";
     }
   });
+
+  // ---- Server Auto-Sync über WLAN ----
+  const serverUrl = window.location.origin === 'file://' ? null : window.location.origin;
+  let serverAvailable = false;
+  let syncInProgress = false;
+
+  async function checkServerConnection() {
+    if (!serverUrl) return false;
+    try {
+      const response = await fetch(serverUrl + '/api/sync', { method: 'GET', signal: AbortSignal.timeout(2000) });
+      return response.ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function syncToServer() {
+    if (!serverUrl || syncInProgress) return;
+    syncInProgress = true;
+    try {
+      const response = await fetch(serverUrl + '/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state)
+      });
+      if (response.ok) {
+        const result = await response.json();
+        updateSyncStatus('✓ Synchronisiert', 'green');
+        return true;
+      }
+    } catch (e) {
+      console.warn('Sync zu Server fehlgeschlagen:', e.message);
+    } finally {
+      syncInProgress = false;
+    }
+    return false;
+  }
+
+  async function syncFromServer() {
+    if (!serverUrl) return;
+    try {
+      const response = await fetch(serverUrl + '/api/sync');
+      if (response.ok) {
+        const serverState = await response.json();
+        if (JSON.stringify(state) !== JSON.stringify(serverState)) {
+          state = serverState;
+          speicherDaten();
+          renderBauabschnitte();
+          renderErfassung();
+          if (document.getElementById("page-auswertung").classList.contains("active")) {
+            renderAuswertung();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Sync vom Server fehlgeschlagen:', e.message);
+    }
+  }
+
+  async function syncFotoToServer(einsatzId, fotoId, dataUrl) {
+    if (!serverUrl) return;
+    try {
+      await fetch(serverUrl + '/api/foto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ einsatzId, fotoId, dataUrl })
+      });
+    } catch (e) {
+      console.warn('Foto-Sync fehlgeschlagen:', e.message);
+    }
+  }
+
+  function updateSyncStatus(text, color = '#1a7f37') {
+    const el = document.getElementById("sync-status");
+    if (el) {
+      el.textContent = text;
+      el.style.color = color;
+    }
+  }
+
+  // Starte Server-Connection Check
+  (async () => {
+    if (serverUrl) {
+      serverAvailable = await checkServerConnection();
+      if (serverAvailable) {
+        updateSyncStatus('🔗 Server verbunden');
+        await syncFromServer();
+        setInterval(syncFromServer, 5000);
+      } else {
+        updateSyncStatus('⚠️ Lokal (kein Server)', '#ff9800');
+      }
+    }
+  })();
 
   function renderAuswertung() {
     const von = awVon.value;
