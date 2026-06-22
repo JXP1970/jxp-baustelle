@@ -92,7 +92,7 @@
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v2.2</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
+  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v2.3</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
@@ -259,7 +259,9 @@
           if (obj) { obj.serverKey = serverKey; store.put(obj); }
         };
         if (serverUrl && serverAvailable) {
-          syncFotoToServer(einsatzId, fotoId, dataUrl).catch(() => {});
+          syncFotoToServer(einsatzId, fotoId, dataUrl)
+            .then((ok) => { if (ok) markiereFotoAlsHochgeladen(db, fotoId); })
+            .catch(() => {});
         }
         resolve(fotoId);
       };
@@ -270,10 +272,32 @@
   function fotoLoeschen(id) {
     return fotoDb().then((db) => new Promise((resolve, reject) => {
       const tx = db.transaction("fotos", "readwrite");
-      const req = tx.objectStore("fotos").delete(id);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      const store = tx.objectStore("fotos");
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const obj = getReq.result;
+        const delReq = store.delete(id);
+        delReq.onsuccess = () => {
+          // Auch auf dem Server löschen, damit das Foto nicht wieder zurückkommt
+          // und auf anderen Geräten ebenfalls verschwindet.
+          if (obj && obj.serverKey) {
+            fotoLoeschenAufServer(obj.serverKey).catch(() => {});
+          }
+          resolve();
+        };
+        delReq.onerror = () => reject(delReq.error);
+      };
+      getReq.onerror = () => reject(getReq.error);
     }));
+  }
+
+  async function fotoLoeschenAufServer(serverKey) {
+    if (!serverUrl) return;
+    try {
+      await fetch(serverUrl + '/api/foto/' + encodeURIComponent(serverKey + '.jpg'), { method: 'DELETE' });
+    } catch (e) {
+      console.warn('Server-Foto-Löschen fehlgeschlagen:', e.message);
+    }
   }
 
   function fotosLoeschenFuerEinsatz(einsatzId) {
@@ -938,16 +962,26 @@
   }
 
   async function syncFotoToServer(einsatzId, fotoId, dataUrl) {
-    if (!serverUrl) return;
+    if (!serverUrl) return false;
     try {
-      await fetch(serverUrl + '/api/foto', {
+      const r = await fetch(serverUrl + '/api/foto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ einsatzId, fotoId, dataUrl })
       });
+      return r.ok;
     } catch (e) {
       console.warn('Foto-Sync fehlgeschlagen:', e.message);
+      return false;
     }
+  }
+
+  // Markiert ein lokales Foto als erfolgreich zum Server hochgeladen.
+  function markiereFotoAlsHochgeladen(db, fotoId) {
+    const tx = db.transaction("fotos", "readwrite");
+    const store = tx.objectStore("fotos");
+    const g = store.get(fotoId);
+    g.onsuccess = () => { const o = g.result; if (o) { o.uploaded = true; store.put(o); } };
   }
 
   // Lädt Fotos vom Server, die lokal noch nicht vorhanden sind.
@@ -966,7 +1000,9 @@
         req.onerror = () => reject(req.error);
       });
       const vorhandeneKeys = new Set(lokale.filter((f) => f.serverKey).map((f) => f.serverKey));
+      const serverKeys = new Set(serverFotos.map((sf) => String(sf.fileName).replace(/\.jpg$/i, "")));
 
+      // 1) Neue Server-Fotos lokal hinzufügen
       let neue = 0;
       for (const sf of serverFotos) {
         const key = String(sf.fileName).replace(/\.jpg$/i, ""); // "einsatzId_fotoId"
@@ -978,13 +1014,30 @@
             dataUrl: sf.dataUrl,
             erstellt: new Date().toISOString(),
             serverKey: key,
+            uploaded: true,
           });
           req.onsuccess = () => { neue++; resolve(); };
           req.onerror = () => reject(req.error);
         });
       }
 
-      if (neue > 0) {
+      // 2) Lokale Fotos entfernen, die zwar hochgeladen waren, aber auf dem
+      //    Server gelöscht wurden (Löschung von anderem Gerät übernehmen).
+      //    Frisch erstellte, noch nicht hochgeladene Fotos (uploaded != true)
+      //    bleiben unangetastet, damit nichts versehentlich verschwindet.
+      let entfernt = 0;
+      for (const f of lokale) {
+        if (f.uploaded === true && f.serverKey && !serverKeys.has(f.serverKey)) {
+          await new Promise((resolve) => {
+            const tx = db.transaction("fotos", "readwrite");
+            const req = tx.objectStore("fotos").delete(f.id);
+            req.onsuccess = () => { entfernt++; resolve(); };
+            req.onerror = () => resolve();
+          });
+        }
+      }
+
+      if (neue > 0 || entfernt > 0) {
         // Anzeige nur aktualisieren, wenn der Benutzer nicht gerade tippt.
         const aktiv = document.activeElement;
         const tippt = bearbeitungAktiv ||
