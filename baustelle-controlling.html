@@ -92,7 +92,7 @@
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
+  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v2.1</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
@@ -897,24 +897,27 @@
 
   async function syncFromServer() {
     if (!serverUrl) return;
-    // Sync pausieren, solange ungespeicherte Eingaben vorliegen oder der
-    // Benutzer gerade ein Feld bearbeitet – sonst würde die Tabelle neu
-    // aufgebaut und die Eingabe verworfen.
-    if (bearbeitungAktiv) return;
-    const aktiv = document.activeElement;
-    if (aktiv && (aktiv.tagName === "INPUT" || aktiv.tagName === "TEXTAREA")) {
-      return;
-    }
     try {
       const response = await fetch(serverUrl + '/api/sync');
       if (response.ok) {
         const serverState = await response.json();
         if (JSON.stringify(state) !== JSON.stringify(serverState)) {
+          // Server-Daten immer im Hintergrund übernehmen (Speicher), aber die
+          // Anzeige NICHT neu aufbauen, solange der Benutzer gerade tippt.
           state = serverState;
-          // Direkt in localStorage speichern, OHNE erneuten Server-Push.
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-          renderBauabschnitte();
-          renderErfassung();
+
+          const erfassungAktiv = document.getElementById("page-erfassung").classList.contains("active");
+          const aktiv = document.activeElement;
+          const tipptGerade = bearbeitungAktiv ||
+            (aktiv && (aktiv.tagName === "INPUT" || aktiv.tagName === "TEXTAREA"));
+
+          // Erfassungstabelle nur neu aufbauen, wenn der Benutzer dort NICHT
+          // gerade Daten eingibt – sonst gingen die Eingaben verloren.
+          if (!(erfassungAktiv && tipptGerade)) {
+            renderBauabschnitte();
+            renderErfassung();
+          }
           if (document.getElementById("page-auswertung").classList.contains("active")) {
             renderAuswertung();
           }

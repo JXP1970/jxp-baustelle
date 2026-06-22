@@ -12,6 +12,14 @@ app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
+// Caching abschalten, damit immer die neueste App-Version geladen wird
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 const DATA_FILE = path.join(__dirname, 'data.json');
 const FOTOS_DIR = path.join(__dirname, 'fotos');
 
@@ -124,8 +132,8 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'baustelle-controlling.html'));
 });
 
-// Serviere statische Dateien
-app.use(express.static(__dirname));
+// Serviere statische Dateien (ohne Caching)
+app.use(express.static(__dirname, { etag: false, lastModified: false, maxAge: 0 }));
 
 const server = app.listen(PORT, () => {
   const ip = Object.values(os.networkInterfaces())
