@@ -64,6 +64,10 @@
   .foto-thumb button { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; padding: 0; line-height: 22px; border-radius: 50%; font-size: 0.9rem; }
   .export-buttons { display: flex; gap: 0.6rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
 
+  table.data-table tr.ba-group td { background: #e9ecf1; border-top: 2px solid #d4d8e0; font-size: 0.98rem; }
+  table.data-table tr.add-row td { background: #fbfcfd; }
+  table.data-table tr.add-row .in-firma::placeholder { color: #1f7a3d; font-weight: 600; }
+
   #print-area { display: none; }
 
   @media (max-width: 600px) {
@@ -92,7 +96,7 @@
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v2.3</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
+  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v2.5</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
@@ -437,8 +441,10 @@
   erfassungDatumInput.value = heute();
   erfassungDatumInput.addEventListener("change", () => { bearbeitungAktiv = false; offeneFotos.clear(); renderErfassung(); });
 
-  function findEinsatz(datum, bauabschnittId) {
-    return state.einsaetze.find((e) => e.datum === datum && e.bauabschnitt_id === bauabschnittId);
+  function einsaetzeFuer(datum, bauabschnittId) {
+    return state.einsaetze
+      .filter((e) => e.datum === datum && e.bauabschnitt_id === bauabschnittId)
+      .sort((a, b) => (a.firma || "").localeCompare(b.firma || "") || a.id - b.id);
   }
 
   function renderFotoGrid(grid, einsatzId) {
@@ -494,39 +500,35 @@
     }
 
     let gesamt = 0;
-    const rows = state.bauabschnitte
+    const bloecke = state.bauabschnitte
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((b) => {
-        const e = findEinsatz(datum, b.id);
-        const anzahl = e ? e.anzahl_arbeiter : "";
-        const stunden = e ? e.stunden : "";
-        const taetigkeit = e ? e.taetigkeit || "" : "";
-        const notiz = e ? e.notiz || "" : "";
-        const mannstunden = e ? e.anzahl_arbeiter * e.stunden : 0;
-        gesamt += mannstunden;
+        const liste = einsaetzeFuer(datum, b.id);
+        let untersumme = 0;
 
-        const fotoCell = e
-          ? `<button class="secondary foto-toggle" data-einsatz="${e.id}">📷 <span class="foto-count" data-count-einsatz="${e.id}">0</span></button>`
-          : '<span class="hint">erst speichern</span>';
+        const einsatzRows = liste
+          .map((e) => {
+            const mannstunden = e.anzahl_arbeiter * e.stunden;
+            untersumme += mannstunden;
 
-        let html = `
-        <tr data-ba="${b.id}">
-          <td>${escapeHtml(b.name)}</td>
-          <td><input type="number" min="0" class="in-anzahl" value="${anzahl}" /></td>
-          <td><input type="number" min="0" step="0.25" class="in-stunden" value="${stunden}" /></td>
+            let zeile = `
+        <tr data-einsatz-id="${e.id}">
+          <td><input class="in-firma" list="firmen-liste" placeholder="Firma" value="${escapeHtml(e.firma || "")}" /></td>
+          <td><input type="number" min="0" class="in-anzahl" value="${e.anzahl_arbeiter}" /></td>
+          <td><input type="number" min="0" step="0.25" class="in-stunden" value="${e.stunden}" /></td>
           <td class="mannstunden out-mannstunden">${mannstunden.toFixed(2)}</td>
-          <td><input class="in-taetigkeit" placeholder="z.B. Mauern, Verputzen" value="${escapeHtml(taetigkeit)}" /></td>
-          <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(notiz)}" /></td>
-          <td>${fotoCell}</td>
+          <td><input class="in-taetigkeit" placeholder="z.B. Mauern, Verputzen" value="${escapeHtml(e.taetigkeit || "")}" /></td>
+          <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(e.notiz || "")}" /></td>
+          <td><button class="secondary foto-toggle" data-einsatz="${e.id}">📷 <span class="foto-count" data-count-einsatz="${e.id}">0</span></button></td>
           <td class="actions">
-            <button data-save="${b.id}">Speichern</button>
-            ${e ? `<button class="danger" data-delete-einsatz="${b.id}">Löschen</button>` : ""}
+            <button data-save-einsatz="${e.id}">Speichern</button>
+            <button class="danger" data-delete-einsatz="${e.id}">Löschen</button>
           </td>
         </tr>`;
 
-        if (e && offeneFotos.has(e.id)) {
-          html += `
+            if (offeneFotos.has(e.id)) {
+              zeile += `
         <tr class="foto-row">
           <td colspan="8">
             <div class="foto-panel">
@@ -538,17 +540,48 @@
             </div>
           </td>
         </tr>`;
-        }
-        return html;
+            }
+            return zeile;
+          })
+          .join("");
+
+        gesamt += untersumme;
+
+        const gruppenKopf = `
+        <tr class="ba-group">
+          <td colspan="8"><strong>${escapeHtml(b.name)}</strong>${liste.length ? ` &nbsp;—&nbsp; Untersumme: ${untersumme.toFixed(2)} Mannstunden` : ""}</td>
+        </tr>`;
+
+        const neueZeile = `
+        <tr class="add-row" data-new-ba="${b.id}">
+          <td><input class="in-firma" list="firmen-liste" placeholder="+ Firma hinzufügen" /></td>
+          <td><input type="number" min="0" class="in-anzahl" placeholder="0" /></td>
+          <td><input type="number" min="0" step="0.25" class="in-stunden" placeholder="0" /></td>
+          <td class="mannstunden out-mannstunden">0.00</td>
+          <td><input class="in-taetigkeit" placeholder="z.B. Mauern, Verputzen" /></td>
+          <td><input class="in-notiz" placeholder="Notiz (optional)" /></td>
+          <td><span class="hint">erst hinzufügen</span></td>
+          <td class="actions"><button data-add-ba="${b.id}">Hinzufügen</button></td>
+        </tr>`;
+
+        return gruppenKopf + einsatzRows + neueZeile;
       })
       .join("");
 
+    const firmenVorschlaege = Array.from(
+      new Set(state.einsaetze.map((e) => (e.firma || "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+
     content.innerHTML = `
+      <datalist id="firmen-liste">
+        ${firmenVorschlaege.map((f) => `<option value="${escapeHtml(f)}"></option>`).join("")}
+      </datalist>
+      <p class="hint">Pro Bauabschnitt kannst du mehrere Firmen erfassen. Neue Firma in der untersten Zeile eintragen und „Hinzufügen" tippen.</p>
       <table class="data-table">
         <thead>
-          <tr><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th><th>Fotos</th><th></th></tr>
+          <tr><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th><th>Fotos</th><th></th></tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody>${bloecke}</tbody>
         <tfoot>
           <tr>
             <td colspan="3"><strong>Gesamt Mannstunden am ${escapeHtml(datum)}</strong></td>
@@ -559,27 +592,34 @@
       </table>`;
 
     // Sobald in einem Erfassungsfeld getippt wird: Sync pausieren, bis gespeichert.
-    content.querySelectorAll("tr[data-ba] input").forEach((input) => {
+    content.querySelectorAll("input").forEach((input) => {
       input.addEventListener("input", () => { bearbeitungAktiv = true; });
     });
 
-    content.querySelectorAll("tr[data-ba] .in-anzahl, tr[data-ba] .in-stunden").forEach((input) => {
+    content.querySelectorAll(".in-anzahl, .in-stunden").forEach((input) => {
       input.addEventListener("input", () => {
         const tr = input.closest("tr");
         const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
         const stunden = Number(tr.querySelector(".in-stunden").value || 0);
-        tr.querySelector(".out-mannstunden").textContent = (anzahl * stunden).toFixed(2);
+        const out = tr.querySelector(".out-mannstunden");
+        if (out) out.textContent = (anzahl * stunden).toFixed(2);
       });
     });
 
-    content.querySelectorAll("[data-save]").forEach((btn) => {
+    function leseZeile(tr) {
+      return {
+        anzahl: Number(tr.querySelector(".in-anzahl").value || 0),
+        stunden: Number(tr.querySelector(".in-stunden").value || 0),
+        firma: tr.querySelector(".in-firma").value.trim(),
+        taetigkeit: tr.querySelector(".in-taetigkeit").value,
+        notiz: tr.querySelector(".in-notiz").value,
+      };
+    }
+
+    content.querySelectorAll("[data-save-einsatz]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const baId = Number(btn.dataset.save);
-        const tr = btn.closest("tr");
-        const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
-        const stunden = Number(tr.querySelector(".in-stunden").value || 0);
-        const taetigkeit = tr.querySelector(".in-taetigkeit").value;
-        const notiz = tr.querySelector(".in-notiz").value;
+        const id = Number(btn.dataset.saveEinsatz);
+        const { anzahl, stunden, firma, taetigkeit, notiz } = leseZeile(btn.closest("tr"));
         const errEl = document.getElementById("erfassung-error");
         const statusEl = document.getElementById("erfassung-status");
         errEl.textContent = "";
@@ -587,40 +627,60 @@
           errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
           return;
         }
-        let e = findEinsatz(datum, baId);
+        const e = state.einsaetze.find((x) => x.id === id);
         if (e) {
           e.anzahl_arbeiter = anzahl;
           e.stunden = stunden;
+          e.firma = firma;
           e.taetigkeit = taetigkeit;
           e.notiz = notiz;
-        } else {
-          state.einsaetze.push({
-            id: state.nextEinsatzId++,
-            datum,
-            bauabschnitt_id: baId,
-            anzahl_arbeiter: anzahl,
-            stunden,
-            taetigkeit,
-            notiz,
-          });
         }
         bearbeitungAktiv = false;
         speicherDaten();
+        statusEl.textContent = `Gespeichert: ${firma || "(ohne Firma)"}`;
+        renderErfassung(true);
+      });
+    });
+
+    content.querySelectorAll("[data-add-ba]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const baId = Number(btn.dataset.addBa);
+        const { anzahl, stunden, firma, taetigkeit, notiz } = leseZeile(btn.closest("tr"));
+        const errEl = document.getElementById("erfassung-error");
+        const statusEl = document.getElementById("erfassung-status");
+        errEl.textContent = "";
+        if (anzahl < 0 || stunden < 0) {
+          errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
+          return;
+        }
+        state.einsaetze.push({
+          id: state.nextEinsatzId++,
+          datum,
+          bauabschnitt_id: baId,
+          firma,
+          anzahl_arbeiter: anzahl,
+          stunden,
+          taetigkeit,
+          notiz,
+        });
+        bearbeitungAktiv = false;
+        speicherDaten();
         const ba = state.bauabschnitte.find((x) => x.id === baId);
-        statusEl.textContent = `Gespeichert: ${ba ? ba.name : ""}`;
+        statusEl.textContent = `Hinzugefügt: ${firma || "(ohne Firma)"}${ba ? " – " + ba.name : ""}`;
         renderErfassung(true);
       });
     });
 
     content.querySelectorAll("[data-delete-einsatz]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const baId = Number(btn.dataset.deleteEinsatz);
-        const e = findEinsatz(datum, baId);
-        if (e) { offeneFotos.delete(e.id); fotosLoeschenFuerEinsatz(e.id); }
-        state.einsaetze = state.einsaetze.filter((x) => !(x.datum === datum && x.bauabschnitt_id === baId));
+        const id = Number(btn.dataset.deleteEinsatz);
+        if (!confirm("Diesen Firmen-Eintrag wirklich löschen? Zugehörige Fotos werden mit gelöscht.")) return;
+        offeneFotos.delete(id);
+        fotosLoeschenFuerEinsatz(id);
+        state.einsaetze = state.einsaetze.filter((x) => x.id !== id);
         bearbeitungAktiv = false;
         speicherDaten();
-        renderErfassung();
+        renderErfassung(true);
       });
     });
 
@@ -684,25 +744,37 @@
       .filter((e) => e.datum >= von && e.datum <= bis)
       .map((e) => {
         const ba = state.bauabschnitte.find((b) => b.id === e.bauabschnitt_id);
-        return { ...e, bauabschnitt_name: ba ? ba.name : "(gelöscht)", mannstunden: e.anzahl_arbeiter * e.stunden };
+        return { ...e, firma: e.firma || "", bauabschnitt_name: ba ? ba.name : "(gelöscht)", mannstunden: e.anzahl_arbeiter * e.stunden };
       })
       .sort((a, b) => (a.datum + a.bauabschnitt_name).localeCompare(b.datum + b.bauabschnitt_name));
 
     const proTagMap = {};
     const proBaMap = {};
+    const proFirmaMap = {};
     let gesamt = 0;
     for (const e of eintraege) {
       proTagMap[e.datum] = (proTagMap[e.datum] || 0) + e.mannstunden;
       if (!proBaMap[e.bauabschnitt_id]) {
-        proBaMap[e.bauabschnitt_id] = { name: e.bauabschnitt_name, mannstunden: 0, arbeitstage: 0 };
+        proBaMap[e.bauabschnitt_id] = { name: e.bauabschnitt_name, mannstunden: 0, tage: new Set() };
       }
       proBaMap[e.bauabschnitt_id].mannstunden += e.mannstunden;
-      proBaMap[e.bauabschnitt_id].arbeitstage += 1;
+      proBaMap[e.bauabschnitt_id].tage.add(e.datum);
+      const firmaName = (e.firma || "").trim() || "(ohne Firma)";
+      if (!proFirmaMap[firmaName]) {
+        proFirmaMap[firmaName] = { name: firmaName, mannstunden: 0, tage: new Set() };
+      }
+      proFirmaMap[firmaName].mannstunden += e.mannstunden;
+      proFirmaMap[firmaName].tage.add(e.datum);
       gesamt += e.mannstunden;
     }
     const proTag = Object.entries(proTagMap).map(([datum, mannstunden]) => ({ datum, mannstunden }));
-    const proBa = Object.values(proBaMap).sort((a, b) => b.mannstunden - a.mannstunden);
-    return { eintraege, proTag, proBa, gesamt };
+    const proBa = Object.values(proBaMap)
+      .map((x) => ({ name: x.name, mannstunden: x.mannstunden, arbeitstage: x.tage.size }))
+      .sort((a, b) => b.mannstunden - a.mannstunden);
+    const proFirma = Object.values(proFirmaMap)
+      .map((x) => ({ name: x.name, mannstunden: x.mannstunden, arbeitstage: x.tage.size }))
+      .sort((a, b) => b.mannstunden - a.mannstunden);
+    return { eintraege, proTag, proBa, proFirma, gesamt };
   }
 
   function escapeCsv(wert) {
@@ -712,15 +784,15 @@
 
   function exportCsv(von, bis) {
     const { eintraege } = berechneAuswertung(von, bis);
-    const headers = ["Datum", "Bauabschnitt", "Anzahl Arbeiter", "Stunden", "Mannstunden", "Tätigkeit", "Notiz"];
-    const zeilen = eintraege.map((e) => [e.datum, e.bauabschnitt_name, e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2), e.taetigkeit || "", e.notiz || ""]);
+    const headers = ["Datum", "Bauabschnitt", "Firma", "Anzahl Arbeiter", "Stunden", "Mannstunden", "Tätigkeit", "Notiz"];
+    const zeilen = eintraege.map((e) => [e.datum, e.bauabschnitt_name, e.firma || "", e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2), e.taetigkeit || "", e.notiz || ""]);
     const csv = [headers, ...zeilen].map((r) => r.map(escapeCsv).join(";")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     triggerDownload(blob, `Auswertung_${von}_bis_${bis}.csv`);
   }
 
   async function exportPdf(von, bis, btn) {
-    const { eintraege, proTag, proBa, gesamt } = berechneAuswertung(von, bis);
+    const { eintraege, proTag, proBa, proFirma, gesamt } = berechneAuswertung(von, bis);
     const printArea = document.getElementById("print-area");
 
     const urspruenglicherText = btn ? btn.textContent : null;
@@ -747,9 +819,13 @@
       <table><thead><tr><th>Bauabschnitt</th><th>Mannstunden</th><th>Erfasste Tage</th></tr></thead><tbody>
         ${proBa.length ? proBa.map((b) => `<tr><td>${escapeHtml(b.name)}</td><td>${b.mannstunden.toFixed(2)}</td><td>${b.arbeitstage}</td></tr>`).join("") : '<tr><td colspan="3">Keine Einträge</td></tr>'}
       </tbody></table>
+      <h2>Mannstunden pro Firma</h2>
+      <table><thead><tr><th>Firma</th><th>Mannstunden</th><th>Erfasste Tage</th></tr></thead><tbody>
+        ${proFirma.length ? proFirma.map((f) => `<tr><td>${escapeHtml(f.name)}</td><td>${f.mannstunden.toFixed(2)}</td><td>${f.arbeitstage}</td></tr>`).join("") : '<tr><td colspan="3">Keine Einträge</td></tr>'}
+      </tbody></table>
       <h2>Alle Einträge</h2>
-      <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead><tbody>
-        ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td><td>${escapeHtml(e.taetigkeit || "")}</td><td>${escapeHtml(e.notiz || "")}</td></tr>`).join("") : '<tr><td colspan="7">Keine Einträge</td></tr>'}
+      <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead><tbody>
+        ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${escapeHtml(e.firma || "")}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td><td>${escapeHtml(e.taetigkeit || "")}</td><td>${escapeHtml(e.notiz || "")}</td></tr>`).join("") : '<tr><td colspan="8">Keine Einträge</td></tr>'}
       </tbody></table>
       ${
         mitFotos.length
@@ -1077,9 +1153,10 @@
     const von = awVon.value;
     const bis = awBis.value;
     const content = document.getElementById("auswertung-content");
-    const { eintraege, proTag, proBa, gesamt } = berechneAuswertung(von, bis);
+    const { eintraege, proTag, proBa, proFirma, gesamt } = berechneAuswertung(von, bis);
     const maxTag = Math.max(1, ...proTag.map((t) => t.mannstunden));
     const maxBa = Math.max(1, ...proBa.map((b) => b.mannstunden));
+    const maxFirma = Math.max(1, ...proFirma.map((f) => f.mannstunden));
 
     content.innerHTML = `
       <div class="export-buttons">
@@ -1129,19 +1206,42 @@
             </table>`
       }
 
+      <h3>Mannstunden pro Firma</h3>
+      ${
+        proFirma.length === 0
+          ? '<p class="empty">Keine Einträge im gewählten Zeitraum.</p>'
+          : `<table class="data-table chart-table">
+              <thead><tr><th>Firma</th><th>Mannstunden</th><th>Erfasste Tage</th></tr></thead>
+              <tbody>${proFirma
+                .map(
+                  (f) => `
+                <tr>
+                  <td>${escapeHtml(f.name)}</td>
+                  <td class="chart-cell">
+                    <div class="bar" style="width:${(f.mannstunden / maxFirma) * 100}%"></div>
+                    <span>${f.mannstunden.toFixed(2)}</span>
+                  </td>
+                  <td>${f.arbeitstage}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+            </table>`
+      }
+
       <h3>Alle Einträge</h3>
       <table class="data-table">
-        <thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead>
+        <thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead>
         <tbody>
           ${
             eintraege.length === 0
-              ? '<tr><td colspan="7" class="empty">Keine Einträge im gewählten Zeitraum.</td></tr>'
+              ? '<tr><td colspan="8" class="empty">Keine Einträge im gewählten Zeitraum.</td></tr>'
               : eintraege
                   .map(
                     (e) => `
               <tr>
                 <td>${escapeHtml(e.datum)}</td>
                 <td>${escapeHtml(e.bauabschnitt_name)}</td>
+                <td>${escapeHtml(e.firma || "")}</td>
                 <td>${e.anzahl_arbeiter}</td>
                 <td>${e.stunden}</td>
                 <td>${e.mannstunden.toFixed(2)}</td>
