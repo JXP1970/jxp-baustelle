@@ -54,6 +54,9 @@
   .chart-cell .bar { background: #f59e0b; height: 1.2rem; border-radius: 4px; display: inline-block; vertical-align: middle; margin-right: 0.5rem; min-width: 2px; }
   .hint { color: #666; font-size: 0.85rem; }
 
+  table.data-table tr.ba-group td { background: #e9ecf1; border-top: 2px solid #d4d8e0; font-size: 0.98rem; }
+  table.data-table tr.add-row td { background: #fbfcfd; }
+  table.data-table tr.add-row .in-firma::placeholder { color: #1f7a3d; font-weight: 600; }
   .foto-row td { background: #fafafa; }
   .foto-panel { padding: 0.5rem 0.25rem; }
   .foto-upload-btn { display: inline-block; padding: 0.45rem 0.9rem; border-radius: 6px; background: #1f2430; color: #fff; font-weight: 600; cursor: pointer; margin-bottom: 0.75rem; }
@@ -383,8 +386,10 @@
   erfassungDatumInput.value = heute();
   erfassungDatumInput.addEventListener("change", () => { offeneFotos.clear(); renderErfassung(); });
 
-  function findEinsatz(datum, bauabschnittId) {
-    return state.einsaetze.find((e) => e.datum === datum && e.bauabschnitt_id === bauabschnittId);
+  function einsaetzeFuer(datum, bauabschnittId) {
+    return state.einsaetze
+      .filter((e) => e.datum === datum && e.bauabschnitt_id === bauabschnittId)
+      .sort((a, b) => (a.firma || "").localeCompare(b.firma || "") || a.id - b.id);
   }
 
   function renderFotoGrid(grid, einsatzId) {
@@ -440,41 +445,36 @@
     }
 
     let gesamt = 0;
-    const rows = state.bauabschnitte
+    const bloecke = state.bauabschnitte
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((b) => {
-        const e = findEinsatz(datum, b.id);
-        const anzahl = e ? e.anzahl_arbeiter : "";
-        const stunden = e ? e.stunden : "";
-        const firma = e ? e.firma || "" : "";
-        const notiz = e ? e.notiz || "" : "";
-        const mannstunden = e ? e.anzahl_arbeiter * e.stunden : 0;
-        gesamt += mannstunden;
+        const liste = einsaetzeFuer(datum, b.id);
+        let untersumme = 0;
 
-        const fotoCell = e
-          ? `<button class="secondary foto-toggle" data-einsatz="${e.id}">📷 <span class="foto-count" data-count-einsatz="${e.id}">0</span></button>`
-          : '<span class="hint">erst speichern</span>';
+        const einsatzRows = liste
+          .map((e) => {
+            const mannstunden = e.anzahl_arbeiter * e.stunden;
+            untersumme += mannstunden;
 
-        let html = `
-        <tr data-ba="${b.id}">
-          <td>${escapeHtml(b.name)}</td>
-          <td><input class="in-firma" list="firmen-liste" placeholder="Firma" value="${escapeHtml(firma)}" /></td>
-          <td><input type="number" min="0" class="in-anzahl" value="${anzahl}" /></td>
-          <td><input type="number" min="0" step="0.25" class="in-stunden" value="${stunden}" /></td>
+            let zeile = `
+        <tr data-einsatz-id="${e.id}">
+          <td><input class="in-firma" list="firmen-liste" placeholder="Firma" value="${escapeHtml(e.firma || "")}" /></td>
+          <td><input type="number" min="0" class="in-anzahl" value="${e.anzahl_arbeiter}" /></td>
+          <td><input type="number" min="0" step="0.25" class="in-stunden" value="${e.stunden}" /></td>
           <td class="mannstunden out-mannstunden">${mannstunden.toFixed(2)}</td>
-          <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(notiz)}" /></td>
-          <td>${fotoCell}</td>
+          <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(e.notiz || "")}" /></td>
+          <td><button class="secondary foto-toggle" data-einsatz="${e.id}">📷 <span class="foto-count" data-count-einsatz="${e.id}">0</span></button></td>
           <td class="actions">
-            <button data-save="${b.id}">Speichern</button>
-            ${e ? `<button class="danger" data-delete-einsatz="${b.id}">Löschen</button>` : ""}
+            <button data-save-einsatz="${e.id}">Speichern</button>
+            <button class="danger" data-delete-einsatz="${e.id}">Löschen</button>
           </td>
         </tr>`;
 
-        if (e && offeneFotos.has(e.id)) {
-          html += `
+            if (offeneFotos.has(e.id)) {
+              zeile += `
         <tr class="foto-row">
-          <td colspan="8">
+          <td colspan="7">
             <div class="foto-panel">
               <label class="foto-upload-btn">Foto aufnehmen / hochladen
                 <input type="file" accept="image/*" capture="environment" multiple class="foto-input" data-einsatz="${e.id}" />
@@ -484,8 +484,30 @@
             </div>
           </td>
         </tr>`;
-        }
-        return html;
+            }
+            return zeile;
+          })
+          .join("");
+
+        gesamt += untersumme;
+
+        const gruppenKopf = `
+        <tr class="ba-group">
+          <td colspan="7"><strong>${escapeHtml(b.name)}</strong>${liste.length ? ` &nbsp;—&nbsp; Untersumme: ${untersumme.toFixed(2)} Mannstunden` : ""}</td>
+        </tr>`;
+
+        const neueZeile = `
+        <tr class="add-row" data-new-ba="${b.id}">
+          <td><input class="in-firma" list="firmen-liste" placeholder="+ Firma hinzufügen" /></td>
+          <td><input type="number" min="0" class="in-anzahl" placeholder="0" /></td>
+          <td><input type="number" min="0" step="0.25" class="in-stunden" placeholder="0" /></td>
+          <td class="mannstunden out-mannstunden">0.00</td>
+          <td><input class="in-notiz" placeholder="Notiz (optional)" /></td>
+          <td><span class="hint">erst hinzufügen</span></td>
+          <td class="actions"><button data-add-ba="${b.id}">Hinzufügen</button></td>
+        </tr>`;
+
+        return gruppenKopf + einsatzRows + neueZeile;
       })
       .join("");
 
@@ -497,37 +519,44 @@
       <datalist id="firmen-liste">
         ${firmenVorschlaege.map((f) => `<option value="${escapeHtml(f)}"></option>`).join("")}
       </datalist>
+      <p class="hint">Pro Bauabschnitt kannst du mehrere Firmen erfassen. Neue Firma in der untersten Zeile eintragen und „Hinzufügen" tippen.</p>
       <table class="data-table">
         <thead>
-          <tr><th>Bauabschnitt</th><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Notiz</th><th>Fotos</th><th></th></tr>
+          <tr><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Notiz</th><th>Fotos</th><th></th></tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody>${bloecke}</tbody>
         <tfoot>
           <tr>
-            <td colspan="4"><strong>Gesamt Mannstunden am ${escapeHtml(datum)}</strong></td>
+            <td colspan="3"><strong>Gesamt Mannstunden am ${escapeHtml(datum)}</strong></td>
             <td class="mannstunden"><strong>${gesamt.toFixed(2)}</strong></td>
             <td colspan="3"></td>
           </tr>
         </tfoot>
       </table>`;
 
-    content.querySelectorAll("tr[data-ba] .in-anzahl, tr[data-ba] .in-stunden").forEach((input) => {
+    content.querySelectorAll(".in-anzahl, .in-stunden").forEach((input) => {
       input.addEventListener("input", () => {
         const tr = input.closest("tr");
         const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
         const stunden = Number(tr.querySelector(".in-stunden").value || 0);
-        tr.querySelector(".out-mannstunden").textContent = (anzahl * stunden).toFixed(2);
+        const out = tr.querySelector(".out-mannstunden");
+        if (out) out.textContent = (anzahl * stunden).toFixed(2);
       });
     });
 
-    content.querySelectorAll("[data-save]").forEach((btn) => {
+    function leseZeile(tr) {
+      return {
+        anzahl: Number(tr.querySelector(".in-anzahl").value || 0),
+        stunden: Number(tr.querySelector(".in-stunden").value || 0),
+        firma: tr.querySelector(".in-firma").value.trim(),
+        notiz: tr.querySelector(".in-notiz").value,
+      };
+    }
+
+    content.querySelectorAll("[data-save-einsatz]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const baId = Number(btn.dataset.save);
-        const tr = btn.closest("tr");
-        const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
-        const stunden = Number(tr.querySelector(".in-stunden").value || 0);
-        const firma = tr.querySelector(".in-firma").value.trim();
-        const notiz = tr.querySelector(".in-notiz").value;
+        const id = Number(btn.dataset.saveEinsatz);
+        const { anzahl, stunden, firma, notiz } = leseZeile(btn.closest("tr"));
         const errEl = document.getElementById("erfassung-error");
         const statusEl = document.getElementById("erfassung-status");
         errEl.textContent = "";
@@ -535,38 +564,59 @@
           errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
           return;
         }
-        let e = findEinsatz(datum, baId);
+        const e = state.einsaetze.find((x) => x.id === id);
         if (e) {
           e.anzahl_arbeiter = anzahl;
           e.stunden = stunden;
           e.firma = firma;
           e.notiz = notiz;
-        } else {
-          state.einsaetze.push({
-            id: state.nextEinsatzId++,
-            datum,
-            bauabschnitt_id: baId,
-            anzahl_arbeiter: anzahl,
-            stunden,
-            firma,
-            notiz,
-          });
         }
         speicherDaten();
+        statusEl.textContent = `Gespeichert: ${firma || "(ohne Firma)"}`;
+        renderErfassung(true);
+      });
+    });
+
+    content.querySelectorAll("[data-add-ba]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const baId = Number(btn.dataset.addBa);
+        const { anzahl, stunden, firma, notiz } = leseZeile(btn.closest("tr"));
+        const errEl = document.getElementById("erfassung-error");
+        const statusEl = document.getElementById("erfassung-status");
+        errEl.textContent = "";
+        if (anzahl < 0 || stunden < 0) {
+          errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
+          return;
+        }
+        if (!firma && anzahl === 0 && stunden === 0) {
+          errEl.textContent = "Bitte mindestens eine Firma oder Stunden eingeben";
+          return;
+        }
+        state.einsaetze.push({
+          id: state.nextEinsatzId++,
+          datum,
+          bauabschnitt_id: baId,
+          anzahl_arbeiter: anzahl,
+          stunden,
+          firma,
+          notiz,
+        });
+        speicherDaten();
         const ba = state.bauabschnitte.find((x) => x.id === baId);
-        statusEl.textContent = `Gespeichert: ${ba ? ba.name : ""}`;
+        statusEl.textContent = `Hinzugefügt: ${firma || "(ohne Firma)"}${ba ? " – " + ba.name : ""}`;
         renderErfassung(true);
       });
     });
 
     content.querySelectorAll("[data-delete-einsatz]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const baId = Number(btn.dataset.deleteEinsatz);
-        const e = findEinsatz(datum, baId);
-        if (e) { offeneFotos.delete(e.id); fotosLoeschenFuerEinsatz(e.id); }
-        state.einsaetze = state.einsaetze.filter((x) => !(x.datum === datum && x.bauabschnitt_id === baId));
+        const id = Number(btn.dataset.deleteEinsatz);
+        if (!confirm("Diesen Firmen-Eintrag wirklich löschen? Zugehörige Fotos werden mit gelöscht.")) return;
+        offeneFotos.delete(id);
+        fotosLoeschenFuerEinsatz(id);
+        state.einsaetze = state.einsaetze.filter((x) => x.id !== id);
         speicherDaten();
-        renderErfassung();
+        renderErfassung(true);
       });
     });
 
@@ -641,21 +691,25 @@
     for (const e of eintraege) {
       proTagMap[e.datum] = (proTagMap[e.datum] || 0) + e.mannstunden;
       if (!proBaMap[e.bauabschnitt_id]) {
-        proBaMap[e.bauabschnitt_id] = { name: e.bauabschnitt_name, mannstunden: 0, arbeitstage: 0 };
+        proBaMap[e.bauabschnitt_id] = { name: e.bauabschnitt_name, mannstunden: 0, tage: new Set() };
       }
       proBaMap[e.bauabschnitt_id].mannstunden += e.mannstunden;
-      proBaMap[e.bauabschnitt_id].arbeitstage += 1;
+      proBaMap[e.bauabschnitt_id].tage.add(e.datum);
       const firmaName = (e.firma || "").trim() || "(ohne Firma)";
       if (!proFirmaMap[firmaName]) {
-        proFirmaMap[firmaName] = { name: firmaName, mannstunden: 0, arbeitstage: 0 };
+        proFirmaMap[firmaName] = { name: firmaName, mannstunden: 0, tage: new Set() };
       }
       proFirmaMap[firmaName].mannstunden += e.mannstunden;
-      proFirmaMap[firmaName].arbeitstage += 1;
+      proFirmaMap[firmaName].tage.add(e.datum);
       gesamt += e.mannstunden;
     }
     const proTag = Object.entries(proTagMap).map(([datum, mannstunden]) => ({ datum, mannstunden }));
-    const proBa = Object.values(proBaMap).sort((a, b) => b.mannstunden - a.mannstunden);
-    const proFirma = Object.values(proFirmaMap).sort((a, b) => b.mannstunden - a.mannstunden);
+    const proBa = Object.values(proBaMap)
+      .map((x) => ({ name: x.name, mannstunden: x.mannstunden, arbeitstage: x.tage.size }))
+      .sort((a, b) => b.mannstunden - a.mannstunden);
+    const proFirma = Object.values(proFirmaMap)
+      .map((x) => ({ name: x.name, mannstunden: x.mannstunden, arbeitstage: x.tage.size }))
+      .sort((a, b) => b.mannstunden - a.mannstunden);
     return { eintraege, proTag, proBa, proFirma, gesamt };
   }
 
