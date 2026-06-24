@@ -1,13 +1,16 @@
 {
   "name": "jxp-baustelle",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Baustellen-Controlling: Arbeiter pro Bauabschnitt erfassen, Leistung auswerten, Beweisfotos und PDF/CSV-Export",
+  "version": "2.4.0",
+  "description": "Baustelle Controlling – lokaler Server für iPad/Desktop-Sync",
+  "main": "server.js",
   "scripts": {
-    "build": "npm install --prefix backend && npm install --prefix frontend && npm run build --prefix frontend",
-    "start": "node backend/server.js"
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "archiver": "^6.0.1"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   }
 }

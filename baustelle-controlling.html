@@ -100,9 +100,12 @@
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
     <button class="tab" data-page="auswertung">Auswertung</button>
   </nav>
+  <div id="server-bar" style="display:none;font-size:0.82rem;margin-top:0.6rem;background:rgba(0,0,0,0.12);border-radius:6px;padding:0.3rem 0.7rem;color:#1f2430;">
+    🔗 Server verbunden &nbsp;|&nbsp; Handy/iPad: <strong id="handy-adresse"></strong>
+  </div>
 </header>
 <main>
-  <p class="hint">Alle Daten und Fotos werden nur lokal in diesem Browser gespeichert (kein Server). PDF wird über die Druckfunktion „Als PDF speichern" erzeugt – funktioniert auch offline und auf dem Handy.</p>
+  <p class="hint" id="storage-hint">Alle Daten und Fotos werden nur lokal in diesem Browser gespeichert (kein Server). PDF wird über die Druckfunktion „Als PDF speichern" erzeugt – funktioniert auch offline und auf dem Handy.</p>
 
   <section id="page-erfassung" class="page active">
     <h2>Tageserfassung</h2>
@@ -131,6 +134,9 @@
 
   <section id="page-auswertung" class="page">
     <h2>Auswertung der Leistung</h2>
+    <div id="backup-container" style="display:none;margin-bottom:0.75rem;">
+      <button id="btn-backup-zip">💾 Daten sichern (ZIP)</button>
+    </div>
     <form class="form-inline" id="auswertung-form">
       <label>Von: <input type="date" id="aw-von" /></label>
       <label>Bis: <input type="date" id="aw-bis" /></label>
@@ -143,10 +149,14 @@
 <div id="print-area"></div>
 
 <script>
-(function () {
+(async function () {
   const STORAGE_KEY = "baustelle-controlling-data";
 
-  function ladeDaten() {
+  // ---- Server-Erkennung & hybride Datenhaltung ----
+  let serverMode = false;
+  let localLastModified = 0;
+
+  function ladeDatenLokal() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return JSON.parse(raw);
@@ -154,11 +164,70 @@
     return { bauabschnitte: [], einsaetze: [], nextBaId: 1, nextEinsatzId: 1 };
   }
 
-  function speicherDaten() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  function speicherDatenLokal() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
   }
 
-  let state = ladeDaten();
+  async function erkenneServerModus() {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 600);
+      const res = await fetch("/api/info", { signal: controller.signal });
+      clearTimeout(tid);
+      if (res.ok) {
+        const info = await res.json();
+        serverMode = true;
+        document.getElementById("server-bar").style.display = "block";
+        document.getElementById("handy-adresse").textContent = `http://${info.ip}:${info.port}`;
+        document.getElementById("storage-hint").textContent =
+          "Alle Daten werden auf dem Server synchronisiert – iPad und Desktop teilen automatisch dieselben Daten.";
+        document.getElementById("backup-container").style.display = "block";
+      }
+    } catch (e) {}
+  }
+
+  async function ladeDatenVomServer() {
+    const res = await fetch("/api/data");
+    const data = await res.json();
+    state.bauabschnitte = data.bauabschnitte || [];
+    state.einsaetze = data.einsaetze || [];
+    state.nextBaId = data.nextBaId || 1;
+    state.nextEinsatzId = data.nextEinsatzId || 1;
+    localLastModified = data.lastModified || 0;
+    speicherDatenLokal();
+  }
+
+  function speicherDaten() {
+    speicherDatenLokal();
+    if (!serverMode) return;
+    fetch("/api/data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state),
+    }).then((r) => r.json()).then((d) => { localLastModified = d.lastModified || 0; }).catch(() => {});
+  }
+
+  async function syncCheck() {
+    if (!serverMode) return;
+    try {
+      const res = await fetch("/api/data");
+      const data = await res.json();
+      if (data.lastModified && data.lastModified > localLastModified) {
+        localLastModified = data.lastModified;
+        state.bauabschnitte = data.bauabschnitte || [];
+        state.einsaetze = data.einsaetze || [];
+        state.nextBaId = data.nextBaId || state.nextBaId;
+        state.nextEinsatzId = data.nextEinsatzId || state.nextEinsatzId;
+        speicherDatenLokal();
+        renderBauabschnitte();
+        const aktiveTab = document.querySelector("nav button.tab.active");
+        if (aktiveTab && aktiveTab.dataset.page === "auswertung") renderAuswertung();
+        if (aktiveTab && aktiveTab.dataset.page === "erfassung") renderErfassung();
+      }
+    } catch (e) {}
+  }
+
+  let state = ladeDatenLokal();
 
   function heute() {
     return new Date().toISOString().slice(0, 10);
@@ -212,6 +281,9 @@
   }
 
   function fotosFuerEinsatz(einsatzId) {
+    if (serverMode) {
+      return fetch(`/api/fotos/${einsatzId}`).then((r) => r.json()).catch(() => []);
+    }
     return fotoDb().then((db) => new Promise((resolve, reject) => {
       const tx = db.transaction("fotos", "readonly");
       const req = tx.objectStore("fotos").index("einsatz_id").getAll(einsatzId);
@@ -221,6 +293,9 @@
   }
 
   function anzahlFotos(einsatzId) {
+    if (serverMode) {
+      return fetch(`/api/fotos/${einsatzId}`).then((r) => r.json()).then((f) => f.length).catch(() => 0);
+    }
     return fotoDb().then((db) => new Promise((resolve, reject) => {
       const tx = db.transaction("fotos", "readonly");
       const req = tx.objectStore("fotos").index("einsatz_id").count(einsatzId);
@@ -230,6 +305,13 @@
   }
 
   function fotoHinzufuegen(einsatzId, dataUrl) {
+    if (serverMode) {
+      return fetch(`/api/fotos/${einsatzId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl }),
+      }).then((r) => r.json());
+    }
     return fotoDb().then((db) => new Promise((resolve, reject) => {
       const tx = db.transaction("fotos", "readwrite");
       const req = tx.objectStore("fotos").add({
@@ -242,7 +324,10 @@
     }));
   }
 
-  function fotoLoeschen(id) {
+  function fotoLoeschen(einsatzId, id) {
+    if (serverMode) {
+      return fetch(`/api/fotos/${einsatzId}/${id}`, { method: "DELETE" }).then((r) => r.json()).catch(() => {});
+    }
     return fotoDb().then((db) => new Promise((resolve, reject) => {
       const tx = db.transaction("fotos", "readwrite");
       const req = tx.objectStore("fotos").delete(id);
@@ -252,8 +337,11 @@
   }
 
   function fotosLoeschenFuerEinsatz(einsatzId) {
+    if (serverMode) {
+      return fetch(`/api/fotos/${einsatzId}`, { method: "DELETE" }).catch(() => {});
+    }
     return fotosFuerEinsatz(einsatzId)
-      .then((fotos) => Promise.all(fotos.map((f) => fotoLoeschen(f.id))))
+      .then((fotos) => Promise.all(fotos.map((f) => fotoLoeschen(einsatzId, f.id))))
       .catch(() => {});
   }
 
@@ -410,7 +498,7 @@
         .join("");
       grid.querySelectorAll(".foto-del").forEach((btn) => {
         btn.addEventListener("click", () => {
-          fotoLoeschen(Number(btn.dataset.fotoId))
+          fotoLoeschen(einsatzId, Number(btn.dataset.fotoId))
             .then(() => renderFotoGrid(grid, einsatzId))
             .then(() => anzahlFotos(einsatzId))
             .then((n) => {
@@ -900,7 +988,18 @@
     if (csvBtn) csvBtn.addEventListener("click", () => exportCsv(von, bis));
   }
 
-  // ---- Initial render ----
+  // ---- Backup ----
+  const backupBtn = document.getElementById("btn-backup-zip");
+  if (backupBtn) {
+    backupBtn.addEventListener("click", () => { window.location.href = "/api/backup"; });
+  }
+
+  // ---- Startup ----
+  await erkenneServerModus();
+  if (serverMode) {
+    try { await ladeDatenVomServer(); } catch (e) { console.warn("Server-Daten konnten nicht geladen werden:", e); }
+    setInterval(syncCheck, 5000);
+  }
   renderBauabschnitte();
   renderErfassung();
 })();
