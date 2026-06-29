@@ -1219,21 +1219,72 @@
     }
   }
 
-  // Starte Server-Connection Check
-  (async () => {
-    if (serverUrl) {
-      serverAvailable = await checkServerConnection();
-      if (serverAvailable) {
-        updateSyncStatus('🔗 Server verbunden');
-        await syncFromServer();
-        await syncFotosFromServer();
-        setInterval(syncFromServer, 5000);
-        setInterval(syncFotosFromServer, 5000);
-      } else {
-        updateSyncStatus('⚠️ Lokal (kein Server)', '#ff9800');
+  // Lädt lokale Fotos hoch, die noch nicht auf dem Server liegen (z.B. offline
+  // auf der Baustelle aufgenommen). Läuft bei jedem Sync-Takt, sodass solche
+  // Fotos nachträglich synchronisiert werden, sobald wieder Verbindung besteht.
+  let fotoUploadLaeuft = false;
+  async function uploadPendingFotos() {
+    if (!serverUrl || !serverAvailable || fotoUploadLaeuft) return;
+    fotoUploadLaeuft = true;
+    try {
+      const db = await fotoDb();
+      const lokale = await new Promise((resolve, reject) => {
+        const tx = db.transaction("fotos", "readonly");
+        const req = tx.objectStore("fotos").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+      let hochgeladen = 0;
+      for (const f of lokale) {
+        if (f.uploaded === true) continue; // schon auf dem Server
+        const ok = await syncFotoToServer(f.einsatz_id, f.id, f.dataUrl);
+        if (ok) {
+          await new Promise((resolve) => {
+            const tx = db.transaction("fotos", "readwrite");
+            const store = tx.objectStore("fotos");
+            const g = store.get(f.id);
+            g.onsuccess = () => {
+              const o = g.result;
+              if (o) { o.uploaded = true; o.serverKey = f.einsatz_id + "_" + f.id; store.put(o); }
+              resolve();
+            };
+            g.onerror = () => resolve();
+          });
+          hochgeladen++;
+        }
       }
+      if (hochgeladen > 0) updateSyncStatus('✓ Fotos synchronisiert', '#1a7f37');
+    } catch (e) {
+      console.warn('Foto-Upload-Sync fehlgeschlagen:', e.message);
+    } finally {
+      fotoUploadLaeuft = false;
     }
-  })();
+  }
+
+  // Ein Sync-Takt: Verbindung prüfen und – wenn verfügbar – Daten und Fotos in
+  // beide Richtungen abgleichen. Erkennt auch einen Reconnect nach
+  // zwischenzeitlichem Verbindungsverlust, ohne dass die Seite neu geladen
+  // werden muss.
+  async function syncTakt() {
+    if (!serverUrl) return;
+    const ok = await checkServerConnection();
+    const warVerbunden = serverAvailable;
+    serverAvailable = ok;
+    if (!ok) {
+      updateSyncStatus('⚠️ Lokal (kein Server)', '#ff9800');
+      return;
+    }
+    if (!warVerbunden) updateSyncStatus('🔗 Server verbunden');
+    await syncFromServer();        // Daten zusammenführen (beide Richtungen)
+    await uploadPendingFotos();    // liegengebliebene Fotos hochladen
+    await syncFotosFromServer();   // neue/gelöschte Server-Fotos übernehmen
+  }
+
+  // Sync starten: sofort und danach alle 5 Sekunden (mit Reconnect-Erkennung)
+  if (serverUrl) {
+    syncTakt();
+    setInterval(syncTakt, 5000);
+  }
 
   function renderAuswertung() {
     const von = awVon.value;
