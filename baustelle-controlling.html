@@ -60,8 +60,13 @@
   .foto-upload-btn input { display: none; }
   .foto-grid { display: flex; flex-wrap: wrap; gap: 0.6rem; }
   .foto-thumb { position: relative; width: 96px; height: 96px; }
-  .foto-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; display: block; border: 1px solid #ddd; }
+  .foto-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; display: block; border: 1px solid #ddd; cursor: zoom-in; }
   .foto-thumb button { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; padding: 0; line-height: 22px; border-radius: 50%; font-size: 0.9rem; }
+
+  .foto-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
+  .foto-lightbox.open { display: flex; }
+  .foto-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+  .foto-lightbox .schliessen { position: absolute; top: 1rem; right: 1rem; width: 44px; height: 44px; padding: 0; line-height: 1; border-radius: 50%; font-size: 1.5rem; }
   .export-buttons { display: flex; gap: 0.6rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
 
   table.data-table tr.ba-group td { background: #e9ecf1; border-top: 2px solid #d4d8e0; font-size: 0.98rem; }
@@ -152,6 +157,11 @@
 </main>
 
 <div id="print-area"></div>
+
+<div id="foto-lightbox" class="foto-lightbox">
+  <button class="danger schliessen" id="foto-lightbox-close" aria-label="Schließen">×</button>
+  <img id="foto-lightbox-img" src="" alt="Foto groß" />
+</div>
 
 <script>
 (function () {
@@ -245,6 +255,27 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---- Foto groß anzeigen (Vollbild-Overlay) ----
+  // Wir öffnen das Bild NICHT als data:-Adresse in einem neuen Tab – das
+  // blockieren mobile Browser. Stattdessen zeigen wir es im Overlay an.
+  const lightbox = document.getElementById("foto-lightbox");
+  const lightboxImg = document.getElementById("foto-lightbox-img");
+  function zeigeFotoGross(src) {
+    if (!lightbox || !lightboxImg) return;
+    lightboxImg.src = src;
+    lightbox.classList.add("open");
+  }
+  function schliesseFoto() {
+    if (!lightbox || !lightboxImg) return;
+    lightbox.classList.remove("open");
+    lightboxImg.src = "";
+  }
+  if (lightbox) {
+    document.getElementById("foto-lightbox-close").addEventListener("click", schliesseFoto);
+    lightbox.addEventListener("click", (e) => { if (e.target === lightbox) schliesseFoto(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") schliesseFoto(); });
   }
 
   // ---- Foto-Speicher (IndexedDB) ----
@@ -510,11 +541,14 @@
         .map(
           (f) => `
         <div class="foto-thumb">
-          <a href="${f.dataUrl}" target="_blank" rel="noreferrer"><img src="${f.dataUrl}" alt="Beweisfoto" /></a>
+          <img src="${f.dataUrl}" alt="Beweisfoto" class="foto-zoom" />
           <button class="danger foto-del" data-foto-id="${f.id}">×</button>
         </div>`
         )
         .join("");
+      grid.querySelectorAll(".foto-zoom").forEach((img) => {
+        img.addEventListener("click", () => zeigeFotoGross(img.src));
+      });
       grid.querySelectorAll(".foto-del").forEach((btn) => {
         btn.addEventListener("click", () => {
           fotoLoeschen(Number(btn.dataset.fotoId))
