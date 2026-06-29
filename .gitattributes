@@ -1,0 +1,11 @@
+# Binärdateien NICHT als Text behandeln (sonst werden sie beim Checkout
+# auf Windows durch Zeilenende-Umwandlung beschädigt -> "ungültiges Icon").
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
+
+# Windows-Startdateien brauchen CRLF-Zeilenenden
+*.bat text eol=crlf
+*.cmd text eol=crlf
