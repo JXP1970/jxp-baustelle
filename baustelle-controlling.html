@@ -18,7 +18,6 @@
     padding: 1rem 1.25rem;
   }
   header h1 { margin: 0 0 0.5rem 0; font-size: 1.3rem; }
-  header .version { font-size: 0.8rem; font-weight: 600; background: #1f2430; color: #fff; padding: 0.1rem 0.5rem; border-radius: 999px; margin-left: 0.5rem; vertical-align: middle; }
   nav { display: flex; gap: 0.75rem; flex-wrap: wrap; }
   nav button.tab {
     color: #1f2430;
@@ -55,18 +54,24 @@
   .chart-cell .bar { background: #f59e0b; height: 1.2rem; border-radius: 4px; display: inline-block; vertical-align: middle; margin-right: 0.5rem; min-width: 2px; }
   .hint { color: #666; font-size: 0.85rem; }
 
-  table.data-table tr.ba-group td { background: #e9ecf1; border-top: 2px solid #d4d8e0; font-size: 0.98rem; }
-  table.data-table tr.add-row td { background: #fbfcfd; }
-  table.data-table tr.add-row .in-firma::placeholder { color: #1f7a3d; font-weight: 600; }
   .foto-row td { background: #fafafa; }
   .foto-panel { padding: 0.5rem 0.25rem; }
   .foto-upload-btn { display: inline-block; padding: 0.45rem 0.9rem; border-radius: 6px; background: #1f2430; color: #fff; font-weight: 600; cursor: pointer; margin-bottom: 0.75rem; }
   .foto-upload-btn input { display: none; }
   .foto-grid { display: flex; flex-wrap: wrap; gap: 0.6rem; }
   .foto-thumb { position: relative; width: 96px; height: 96px; }
-  .foto-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; display: block; border: 1px solid #ddd; }
+  .foto-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; display: block; border: 1px solid #ddd; cursor: zoom-in; }
   .foto-thumb button { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; padding: 0; line-height: 22px; border-radius: 50%; font-size: 0.9rem; }
+
+  .foto-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
+  .foto-lightbox.open { display: flex; }
+  .foto-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+  .foto-lightbox .schliessen { position: absolute; top: 1rem; right: 1rem; width: 44px; height: 44px; padding: 0; line-height: 1; border-radius: 50%; font-size: 1.5rem; }
   .export-buttons { display: flex; gap: 0.6rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+
+  table.data-table tr.ba-group td { background: #e9ecf1; border-top: 2px solid #d4d8e0; font-size: 0.98rem; }
+  table.data-table tr.add-row td { background: #fbfcfd; }
+  table.data-table tr.add-row .in-firma::placeholder { color: #1f7a3d; font-weight: 600; }
 
   #print-area { display: none; }
 
@@ -91,10 +96,12 @@
     #print-area .foto-beweis figcaption { font-size: 10px; text-align: center; }
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling <span class="version">v2.4</span></h1>
+  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v2.6</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
@@ -102,7 +109,7 @@
   </nav>
 </header>
 <main>
-  <p class="hint">Alle Daten und Fotos werden nur lokal in diesem Browser gespeichert (kein Server). PDF wird über die Druckfunktion „Als PDF speichern" erzeugt – funktioniert auch offline und auf dem Handy.</p>
+  <p class="hint">Mit laufendem Server (Auto-Sync) werden Daten und Fotos zwischen Handy und Desktop automatisch <strong>zusammengeführt</strong> – ohne dass etwas überschrieben wird. Ohne Server arbeitet die App lokal weiter und gleicht sich ab, sobald wieder eine Verbindung besteht. PDF wird über die Druckfunktion „Als PDF speichern" erzeugt.</p>
 
   <section id="page-erfassung" class="page active">
     <h2>Tageserfassung</h2>
@@ -131,6 +138,15 @@
 
   <section id="page-auswertung" class="page">
     <h2>Auswertung der Leistung</h2>
+    <div id="backup-section">
+      <div class="export-buttons">
+        <button type="button" id="backup-export-btn">💾 Daten sichern (ZIP)</button>
+        <button type="button" id="backup-import-btn">📂 Daten wiederherstellen</button>
+        <input type="file" id="backup-import-input" accept=".zip" style="display:none;" />
+      </div>
+      <div id="backup-status" class="status" style="display:none; margin-bottom:1rem;"></div>
+      <div id="backup-error" class="error" style="margin-bottom:1rem;"></div>
+    </div>
     <form class="form-inline" id="auswertung-form">
       <label>Von: <input type="date" id="aw-von" /></label>
       <label>Bis: <input type="date" id="aw-bis" /></label>
@@ -141,6 +157,11 @@
 </main>
 
 <div id="print-area"></div>
+
+<div id="foto-lightbox" class="foto-lightbox">
+  <button class="danger schliessen" id="foto-lightbox-close" aria-label="Schließen">×</button>
+  <img id="foto-lightbox-img" src="" alt="Foto groß" />
+</div>
 
 <script>
 (function () {
@@ -156,6 +177,9 @@
 
   function speicherDaten() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (serverUrl && serverAvailable) {
+      syncToServer().catch(() => {});
+    }
   }
 
   let state = ladeDaten();
@@ -168,6 +192,52 @@
     const d = new Date();
     d.setDate(d.getDate() - n);
     return d.toISOString().slice(0, 10);
+  }
+
+  // ---- Eindeutige IDs & Zusammenführen (Merge) ----
+  // Damit Handy und Desktop sich NIE gegenseitig Daten überschreiben:
+  // jede neue id ist global eindeutig (zeitstempelbasiert), und jeder
+  // Datensatz trägt updatedAt. Beim Sync wird zusammengeführt statt ersetzt.
+  function jetzt() { return Date.now(); }
+  function neueId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); }
+
+  function mergeListe(localArr, serverArr) {
+    const map = new Map();
+    function add(rec) {
+      if (!rec || rec.id == null) return;
+      const key = String(rec.id);
+      const ex = map.get(key);
+      if (!ex) { map.set(key, rec); return; }
+      const ru = Number(rec.updatedAt || 0);
+      const eu = Number(ex.updatedAt || 0);
+      if (ru >= eu) map.set(key, rec); // neuerer Stand gewinnt; sonst behalten
+    }
+    (Array.isArray(localArr) ? localArr : []).forEach(add);
+    (Array.isArray(serverArr) ? serverArr : []).forEach(add);
+    return Array.from(map.values()).sort((a, b) => Number(a.id) - Number(b.id));
+  }
+
+  function mergeState(a, b) {
+    a = a || {};
+    b = b || {};
+    return {
+      bauabschnitte: mergeListe(a.bauabschnitte, b.bauabschnitte),
+      einsaetze: mergeListe(a.einsaetze, b.einsaetze),
+      nextBaId: Math.max(Number(a.nextBaId) || 1, Number(b.nextBaId) || 1),
+      nextEinsatzId: Math.max(Number(a.nextEinsatzId) || 1, Number(b.nextEinsatzId) || 1),
+    };
+  }
+
+  function canonState(s) {
+    s = s || {};
+    const ba = (Array.isArray(s.bauabschnitte) ? s.bauabschnitte : []).slice().sort((a, b) => Number(a.id) - Number(b.id));
+    const ein = (Array.isArray(s.einsaetze) ? s.einsaetze : []).slice().sort((a, b) => Number(a.id) - Number(b.id));
+    return JSON.stringify({
+      bauabschnitte: ba,
+      einsaetze: ein,
+      nextBaId: Number(s.nextBaId) || 1,
+      nextEinsatzId: Number(s.nextEinsatzId) || 1,
+    });
   }
 
   function escapeHtml(str) {
@@ -185,6 +255,27 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---- Foto groß anzeigen (Vollbild-Overlay) ----
+  // Wir öffnen das Bild NICHT als data:-Adresse in einem neuen Tab – das
+  // blockieren mobile Browser. Stattdessen zeigen wir es im Overlay an.
+  const lightbox = document.getElementById("foto-lightbox");
+  const lightboxImg = document.getElementById("foto-lightbox-img");
+  function zeigeFotoGross(src) {
+    if (!lightbox || !lightboxImg) return;
+    lightboxImg.src = src;
+    lightbox.classList.add("open");
+  }
+  function schliesseFoto() {
+    if (!lightbox || !lightboxImg) return;
+    lightbox.classList.remove("open");
+    lightboxImg.src = "";
+  }
+  if (lightbox) {
+    document.getElementById("foto-lightbox-close").addEventListener("click", schliesseFoto);
+    lightbox.addEventListener("click", (e) => { if (e.target === lightbox) schliesseFoto(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") schliesseFoto(); });
   }
 
   // ---- Foto-Speicher (IndexedDB) ----
@@ -232,12 +323,29 @@
   function fotoHinzufuegen(einsatzId, dataUrl) {
     return fotoDb().then((db) => new Promise((resolve, reject) => {
       const tx = db.transaction("fotos", "readwrite");
-      const req = tx.objectStore("fotos").add({
+      const store = tx.objectStore("fotos");
+      const req = store.add({
         einsatz_id: einsatzId,
         dataUrl: dataUrl,
         erstellt: new Date().toISOString(),
       });
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const fotoId = req.result;
+        // serverKey nachtragen (= Dateiname auf dem Server), damit dieses Foto
+        // beim Download-Sync nicht erneut als "neu" importiert wird.
+        const serverKey = einsatzId + "_" + fotoId;
+        const getReq = store.get(fotoId);
+        getReq.onsuccess = () => {
+          const obj = getReq.result;
+          if (obj) { obj.serverKey = serverKey; store.put(obj); }
+        };
+        if (serverUrl && serverAvailable) {
+          syncFotoToServer(einsatzId, fotoId, dataUrl)
+            .then((ok) => { if (ok) markiereFotoAlsHochgeladen(db, fotoId); })
+            .catch(() => {});
+        }
+        resolve(fotoId);
+      };
       req.onerror = () => reject(req.error);
     }));
   }
@@ -245,10 +353,32 @@
   function fotoLoeschen(id) {
     return fotoDb().then((db) => new Promise((resolve, reject) => {
       const tx = db.transaction("fotos", "readwrite");
-      const req = tx.objectStore("fotos").delete(id);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      const store = tx.objectStore("fotos");
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const obj = getReq.result;
+        const delReq = store.delete(id);
+        delReq.onsuccess = () => {
+          // Auch auf dem Server löschen, damit das Foto nicht wieder zurückkommt
+          // und auf anderen Geräten ebenfalls verschwindet.
+          if (obj && obj.serverKey) {
+            fotoLoeschenAufServer(obj.serverKey).catch(() => {});
+          }
+          resolve();
+        };
+        delReq.onerror = () => reject(delReq.error);
+      };
+      getReq.onerror = () => reject(getReq.error);
     }));
+  }
+
+  async function fotoLoeschenAufServer(serverKey) {
+    if (!serverUrl) return;
+    try {
+      await fetch(serverUrl + '/api/foto/' + encodeURIComponent(serverKey + '.jpg'), { method: 'DELETE' });
+    } catch (e) {
+      console.warn('Server-Foto-Löschen fehlgeschlagen:', e.message);
+    }
   }
 
   function fotosLoeschenFuerEinsatz(einsatzId) {
@@ -299,11 +429,12 @@
 
   function renderBauabschnitte() {
     const tbody = document.getElementById("bauabschnitte-liste");
-    if (state.bauabschnitte.length === 0) {
+    const sichtbar = state.bauabschnitte.filter((b) => !b.deleted);
+    if (sichtbar.length === 0) {
       tbody.innerHTML = '<tr><td colspan="3" class="empty">Noch keine Bauabschnitte angelegt.</td></tr>';
       return;
     }
-    tbody.innerHTML = state.bauabschnitte
+    tbody.innerHTML = sichtbar
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(
@@ -334,9 +465,14 @@
       btn.addEventListener("click", () => {
         if (!confirm("Bauabschnitt wirklich löschen? Zugehörige Einsätze und Fotos werden mit gelöscht.")) return;
         const id = Number(btn.dataset.delete);
-        const betroffeneEinsaetze = state.einsaetze.filter((x) => x.bauabschnitt_id === id).map((x) => x.id);
-        state.bauabschnitte = state.bauabschnitte.filter((x) => x.id !== id);
-        state.einsaetze = state.einsaetze.filter((x) => x.bauabschnitt_id !== id);
+        const betroffeneEinsaetze = state.einsaetze.filter((x) => x.bauabschnitt_id === id && !x.deleted).map((x) => x.id);
+        // Als gelöscht markieren (Grabstein) statt entfernen, damit sich die
+        // Löschung verbreitet und der Eintrag nicht beim nächsten Sync zurückkommt.
+        const ba = state.bauabschnitte.find((x) => x.id === id);
+        if (ba) { ba.deleted = true; ba.updatedAt = jetzt(); }
+        state.einsaetze.forEach((e) => {
+          if (e.bauabschnitt_id === id && !e.deleted) { e.deleted = true; e.updatedAt = jetzt(); }
+        });
         speicherDaten();
         betroffeneEinsaetze.forEach((eid) => { offeneFotos.delete(eid); fotosLoeschenFuerEinsatz(eid); });
         renderBauabschnitte();
@@ -360,12 +496,13 @@
       if (b) {
         b.name = name;
         b.beschreibung = beschreibung;
+        b.updatedAt = jetzt();
       }
       editId = null;
       document.getElementById("ba-submit-btn").textContent = "Hinzufügen";
       document.getElementById("ba-cancel-btn").style.display = "none";
     } else {
-      state.bauabschnitte.push({ id: state.nextBaId++, name, beschreibung });
+      state.bauabschnitte.push({ id: neueId(), name, beschreibung, updatedAt: jetzt() });
     }
     speicherDaten();
     document.getElementById("bauabschnitt-form").reset();
@@ -382,14 +519,15 @@
 
   // ---- Tageserfassung ----
   const offeneFotos = new Set(); // einsatz-ids, deren Fotopanel offen ist
+  let bearbeitungAktiv = false; // true, sobald ungespeicherte Eingaben vorliegen -> Sync pausiert
 
   const erfassungDatumInput = document.getElementById("erfassung-datum");
   erfassungDatumInput.value = heute();
-  erfassungDatumInput.addEventListener("change", () => { offeneFotos.clear(); renderErfassung(); });
+  erfassungDatumInput.addEventListener("change", () => { bearbeitungAktiv = false; offeneFotos.clear(); renderErfassung(); });
 
   function einsaetzeFuer(datum, bauabschnittId) {
     return state.einsaetze
-      .filter((e) => e.datum === datum && e.bauabschnitt_id === bauabschnittId)
+      .filter((e) => !e.deleted && e.datum === datum && e.bauabschnitt_id === bauabschnittId)
       .sort((a, b) => (a.firma || "").localeCompare(b.firma || "") || a.id - b.id);
   }
 
@@ -403,11 +541,14 @@
         .map(
           (f) => `
         <div class="foto-thumb">
-          <a href="${f.dataUrl}" target="_blank" rel="noreferrer"><img src="${f.dataUrl}" alt="Beweisfoto" /></a>
+          <img src="${f.dataUrl}" alt="Beweisfoto" class="foto-zoom" />
           <button class="danger foto-del" data-foto-id="${f.id}">×</button>
         </div>`
         )
         .join("");
+      grid.querySelectorAll(".foto-zoom").forEach((img) => {
+        img.addEventListener("click", () => zeigeFotoGross(img.src));
+      });
       grid.querySelectorAll(".foto-del").forEach((btn) => {
         btn.addEventListener("click", () => {
           fotoLoeschen(Number(btn.dataset.fotoId))
@@ -440,13 +581,14 @@
     document.getElementById("erfassung-error").textContent = "";
     if (!behalteStatus) document.getElementById("erfassung-status").textContent = "";
 
-    if (state.bauabschnitte.length === 0) {
+    const sichtbareBa = state.bauabschnitte.filter((b) => !b.deleted);
+    if (sichtbareBa.length === 0) {
       content.innerHTML = '<p class="empty">Noch keine Bauabschnitte angelegt. Bitte zuerst unter "Bauabschnitte" einen Bauabschnitt anlegen.</p>';
       return;
     }
 
     let gesamt = 0;
-    const bloecke = state.bauabschnitte
+    const bloecke = sichtbareBa
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((b) => {
@@ -464,7 +606,8 @@
           <td><input type="number" min="0" class="in-anzahl" value="${e.anzahl_arbeiter}" /></td>
           <td><input type="number" min="0" step="0.25" class="in-stunden" value="${e.stunden}" /></td>
           <td class="mannstunden out-mannstunden">${mannstunden.toFixed(2)}</td>
-          <td><input class="in-notiz" placeholder="Tätigkeit" value="${escapeHtml(e.notiz || "")}" /></td>
+          <td><input class="in-taetigkeit" placeholder="z.B. Mauern, Verputzen" value="${escapeHtml(e.taetigkeit || "")}" /></td>
+          <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(e.notiz || "")}" /></td>
           <td><button class="secondary foto-toggle" data-einsatz="${e.id}">📷 <span class="foto-count" data-count-einsatz="${e.id}">0</span></button></td>
           <td class="actions">
             <button data-save-einsatz="${e.id}">Speichern</button>
@@ -475,7 +618,7 @@
             if (offeneFotos.has(e.id)) {
               zeile += `
         <tr class="foto-row">
-          <td colspan="7">
+          <td colspan="8">
             <div class="foto-panel">
               <label class="foto-upload-btn">Foto aufnehmen / hochladen
                 <input type="file" accept="image/*" capture="environment" multiple class="foto-input" data-einsatz="${e.id}" />
@@ -494,7 +637,7 @@
 
         const gruppenKopf = `
         <tr class="ba-group">
-          <td colspan="7"><strong>${escapeHtml(b.name)}</strong>${liste.length ? ` &nbsp;—&nbsp; Untersumme: ${untersumme.toFixed(2)} Mannstunden` : ""}</td>
+          <td colspan="8"><strong>${escapeHtml(b.name)}</strong>${liste.length ? ` &nbsp;—&nbsp; Untersumme: ${untersumme.toFixed(2)} Mannstunden` : ""}</td>
         </tr>`;
 
         const neueZeile = `
@@ -503,7 +646,8 @@
           <td><input type="number" min="0" class="in-anzahl" placeholder="0" /></td>
           <td><input type="number" min="0" step="0.25" class="in-stunden" placeholder="0" /></td>
           <td class="mannstunden out-mannstunden">0.00</td>
-          <td><input class="in-notiz" placeholder="Tätigkeit" /></td>
+          <td><input class="in-taetigkeit" placeholder="z.B. Mauern, Verputzen" /></td>
+          <td><input class="in-notiz" placeholder="Notiz (optional)" /></td>
           <td><span class="hint">erst hinzufügen</span></td>
           <td class="actions"><button data-add-ba="${b.id}">Hinzufügen</button></td>
         </tr>`;
@@ -513,7 +657,7 @@
       .join("");
 
     const firmenVorschlaege = Array.from(
-      new Set(state.einsaetze.map((e) => (e.firma || "").trim()).filter(Boolean))
+      new Set(state.einsaetze.filter((e) => !e.deleted).map((e) => (e.firma || "").trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
 
     content.innerHTML = `
@@ -523,17 +667,22 @@
       <p class="hint">Pro Bauabschnitt kannst du mehrere Firmen erfassen. Neue Firma in der untersten Zeile eintragen und „Hinzufügen" tippen.</p>
       <table class="data-table">
         <thead>
-          <tr><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Tätigkeit</th><th>Fotos</th><th></th></tr>
+          <tr><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th><th>Fotos</th><th></th></tr>
         </thead>
         <tbody>${bloecke}</tbody>
         <tfoot>
           <tr>
             <td colspan="3"><strong>Gesamt Mannstunden am ${escapeHtml(datum)}</strong></td>
             <td class="mannstunden"><strong>${gesamt.toFixed(2)}</strong></td>
-            <td colspan="3"></td>
+            <td colspan="4"></td>
           </tr>
         </tfoot>
       </table>`;
+
+    // Sobald in einem Erfassungsfeld getippt wird: Sync pausieren, bis gespeichert.
+    content.querySelectorAll("input").forEach((input) => {
+      input.addEventListener("input", () => { bearbeitungAktiv = true; });
+    });
 
     content.querySelectorAll(".in-anzahl, .in-stunden").forEach((input) => {
       input.addEventListener("input", () => {
@@ -550,6 +699,7 @@
         anzahl: Number(tr.querySelector(".in-anzahl").value || 0),
         stunden: Number(tr.querySelector(".in-stunden").value || 0),
         firma: tr.querySelector(".in-firma").value.trim(),
+        taetigkeit: tr.querySelector(".in-taetigkeit").value,
         notiz: tr.querySelector(".in-notiz").value,
       };
     }
@@ -557,7 +707,7 @@
     content.querySelectorAll("[data-save-einsatz]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const id = Number(btn.dataset.saveEinsatz);
-        const { anzahl, stunden, firma, notiz } = leseZeile(btn.closest("tr"));
+        const { anzahl, stunden, firma, taetigkeit, notiz } = leseZeile(btn.closest("tr"));
         const errEl = document.getElementById("erfassung-error");
         const statusEl = document.getElementById("erfassung-status");
         errEl.textContent = "";
@@ -570,8 +720,11 @@
           e.anzahl_arbeiter = anzahl;
           e.stunden = stunden;
           e.firma = firma;
+          e.taetigkeit = taetigkeit;
           e.notiz = notiz;
+          e.updatedAt = jetzt();
         }
+        bearbeitungAktiv = false;
         speicherDaten();
         statusEl.textContent = `Gespeichert: ${firma || "(ohne Firma)"}`;
         renderErfassung(true);
@@ -581,7 +734,7 @@
     content.querySelectorAll("[data-add-ba]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const baId = Number(btn.dataset.addBa);
-        const { anzahl, stunden, firma, notiz } = leseZeile(btn.closest("tr"));
+        const { anzahl, stunden, firma, taetigkeit, notiz } = leseZeile(btn.closest("tr"));
         const errEl = document.getElementById("erfassung-error");
         const statusEl = document.getElementById("erfassung-status");
         errEl.textContent = "";
@@ -589,19 +742,18 @@
           errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
           return;
         }
-        if (!firma && anzahl === 0 && stunden === 0) {
-          errEl.textContent = "Bitte mindestens eine Firma oder Stunden eingeben";
-          return;
-        }
         state.einsaetze.push({
-          id: state.nextEinsatzId++,
+          id: neueId(),
           datum,
           bauabschnitt_id: baId,
+          firma,
           anzahl_arbeiter: anzahl,
           stunden,
-          firma,
+          taetigkeit,
           notiz,
+          updatedAt: jetzt(),
         });
+        bearbeitungAktiv = false;
         speicherDaten();
         const ba = state.bauabschnitte.find((x) => x.id === baId);
         statusEl.textContent = `Hinzugefügt: ${firma || "(ohne Firma)"}${ba ? " – " + ba.name : ""}`;
@@ -615,7 +767,10 @@
         if (!confirm("Diesen Firmen-Eintrag wirklich löschen? Zugehörige Fotos werden mit gelöscht.")) return;
         offeneFotos.delete(id);
         fotosLoeschenFuerEinsatz(id);
-        state.einsaetze = state.einsaetze.filter((x) => x.id !== id);
+        // Grabstein statt Entfernen (sonst kommt der Eintrag beim Sync zurück).
+        const e = state.einsaetze.find((x) => x.id === id);
+        if (e) { e.deleted = true; e.updatedAt = jetzt(); }
+        bearbeitungAktiv = false;
         speicherDaten();
         renderErfassung(true);
       });
@@ -678,7 +833,7 @@
 
   function berechneAuswertung(von, bis) {
     const eintraege = state.einsaetze
-      .filter((e) => e.datum >= von && e.datum <= bis)
+      .filter((e) => !e.deleted && e.datum >= von && e.datum <= bis)
       .map((e) => {
         const ba = state.bauabschnitte.find((b) => b.id === e.bauabschnitt_id);
         return { ...e, firma: e.firma || "", bauabschnitt_name: ba ? ba.name : "(gelöscht)", mannstunden: e.anzahl_arbeiter * e.stunden };
@@ -721,8 +876,8 @@
 
   function exportCsv(von, bis) {
     const { eintraege } = berechneAuswertung(von, bis);
-    const headers = ["Datum", "Bauabschnitt", "Firma", "Anzahl Arbeiter", "Stunden", "Mannstunden", "Tätigkeit"];
-    const zeilen = eintraege.map((e) => [e.datum, e.bauabschnitt_name, e.firma, e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2), e.notiz || ""]);
+    const headers = ["Datum", "Bauabschnitt", "Firma", "Anzahl Arbeiter", "Stunden", "Mannstunden", "Tätigkeit", "Notiz"];
+    const zeilen = eintraege.map((e) => [e.datum, e.bauabschnitt_name, e.firma || "", e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2), e.taetigkeit || "", e.notiz || ""]);
     const csv = [headers, ...zeilen].map((r) => r.map(escapeCsv).join(";")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     triggerDownload(blob, `Auswertung_${von}_bis_${bis}.csv`);
@@ -761,8 +916,8 @@
         ${proFirma.length ? proFirma.map((f) => `<tr><td>${escapeHtml(f.name)}</td><td>${f.mannstunden.toFixed(2)}</td><td>${f.arbeitstage}</td></tr>`).join("") : '<tr><td colspan="3">Keine Einträge</td></tr>'}
       </tbody></table>
       <h2>Alle Einträge</h2>
-      <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th></tr></thead><tbody>
-        ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${escapeHtml(e.firma)}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td><td>${escapeHtml(e.notiz || "")}</td></tr>`).join("") : '<tr><td colspan="7">Keine Einträge</td></tr>'}
+      <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead><tbody>
+        ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${escapeHtml(e.firma || "")}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td><td>${escapeHtml(e.taetigkeit || "")}</td><td>${escapeHtml(e.notiz || "")}</td></tr>`).join("") : '<tr><td colspan="8">Keine Einträge</td></tr>'}
       </tbody></table>
       ${
         mitFotos.length
@@ -789,6 +944,381 @@
     const printArea = document.getElementById("print-area");
     if (printArea) printArea.innerHTML = "";
   });
+
+  // ---- Backup / Export / Import ----
+  async function exportAsZip() {
+    const statusEl = document.getElementById("backup-status");
+    const errorEl = document.getElementById("backup-error");
+    statusEl.style.display = "none";
+    errorEl.textContent = "";
+
+    try {
+      const zip = new JSZip();
+      zip.file("data.json", JSON.stringify(state, null, 2));
+
+      const db = await fotoDb();
+      const allFotos = await new Promise((resolve, reject) => {
+        const tx = db.transaction("fotos", "readonly");
+        const req = tx.objectStore("fotos").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+
+      for (const foto of allFotos) {
+        const fileName = `fotos/${foto.einsatz_id}_${foto.id}.jpg`;
+        zip.file(fileName, foto.dataUrl.split(",")[1], { base64: true });
+      }
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const datum = new Date().toISOString().slice(0, 10);
+      triggerDownload(blob, `Baustelle-Backup_${datum}.zip`);
+
+      statusEl.textContent = `✓ Sicherung erfolgreich erstellt (${allFotos.length} Fotos)`;
+      statusEl.style.display = "block";
+    } catch (err) {
+      errorEl.textContent = "Fehler beim Exportieren: " + (err && err.message ? err.message : "unbekannt");
+    }
+  }
+
+  async function importFromZip(file) {
+    const statusEl = document.getElementById("backup-status");
+    const errorEl = document.getElementById("backup-error");
+    statusEl.style.display = "none";
+    errorEl.textContent = "";
+
+    try {
+      const zip = await JSZip.loadAsync(file);
+
+      const dataFile = zip.file("data.json");
+      if (!dataFile) {
+        errorEl.textContent = "Ungültiges Backup: data.json nicht gefunden";
+        return;
+      }
+
+      const dataJson = await dataFile.async("string");
+      const importedState = JSON.parse(dataJson);
+
+      if (!importedState.bauabschnitte || !importedState.einsaetze) {
+        errorEl.textContent = "Ungültiges Backup: Struktur fehlerhaft";
+        return;
+      }
+
+      // Backup mit vorhandenen Daten ZUSAMMENFÜHREN statt ersetzen,
+      // damit eine Wiederherstellung nichts Aktuelles wegwirft.
+      state = mergeState(state, importedState);
+      speicherDaten();
+
+      const db = await fotoDb();
+      const fotoFiles = Object.keys(zip.files).filter(name => name.startsWith("fotos/"));
+      let importedFotoCount = 0;
+
+      // Bereits vorhandene Foto-Schlüssel ermitteln, um Duplikate zu vermeiden.
+      const vorhandene = await new Promise((resolve, reject) => {
+        const tx = db.transaction("fotos", "readonly");
+        const req = tx.objectStore("fotos").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+      const vorhandeneKeys = new Set(vorhandene.filter((f) => f.serverKey).map((f) => f.serverKey));
+
+      for (const fotoPath of fotoFiles) {
+        try {
+          const dateiTeil = fotoPath.split("/")[1].replace(/\.jpg$/i, "");
+          if (vorhandeneKeys.has(dateiTeil)) continue;
+          const fotoData = await zip.file(fotoPath).async("base64");
+          const dataUrl = "data:image/jpeg;base64," + fotoData;
+          const einsatzId = Number(dateiTeil.split("_")[0]);
+
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction("fotos", "readwrite");
+            const req = tx.objectStore("fotos").add({
+              einsatz_id: einsatzId,
+              dataUrl: dataUrl,
+              erstellt: new Date().toISOString(),
+              serverKey: dateiTeil,
+            });
+            req.onsuccess = () => { importedFotoCount++; resolve(); };
+            req.onerror = () => reject(req.error);
+          });
+        } catch (e) {
+          console.warn("Fehler beim Import von " + fotoPath, e);
+        }
+      }
+
+      statusEl.textContent = `✓ Wiederhergestellt: ${state.bauabschnitte.filter((b) => !b.deleted).length} Abschnitte, ${state.einsaetze.filter((e) => !e.deleted).length} Einsätze, ${importedFotoCount} Fotos`;
+      statusEl.style.display = "block";
+
+      renderBauabschnitte();
+      renderErfassung();
+      if (document.getElementById("page-auswertung").classList.contains("active")) {
+        renderAuswertung();
+      }
+
+      offeneFotos.clear();
+    } catch (err) {
+      errorEl.textContent = "Fehler beim Importieren: " + (err && err.message ? err.message : "unbekannt");
+    }
+  }
+
+  document.getElementById("backup-export-btn").addEventListener("click", () => exportAsZip());
+  document.getElementById("backup-import-btn").addEventListener("click", () => {
+    document.getElementById("backup-import-input").click();
+  });
+  document.getElementById("backup-import-input").addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      importFromZip(file);
+      e.target.value = "";
+    }
+  });
+
+  // ---- Server Auto-Sync über WLAN ----
+  const serverUrl = window.location.origin === 'file://' ? null : window.location.origin;
+  let serverAvailable = false;
+  let syncInProgress = false;
+
+  async function checkServerConnection() {
+    if (!serverUrl) return false;
+    try {
+      const response = await fetch(serverUrl + '/api/sync', { method: 'GET', signal: AbortSignal.timeout(2000) });
+      return response.ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function syncToServer() {
+    if (!serverUrl || syncInProgress) return;
+    syncInProgress = true;
+    try {
+      const response = await fetch(serverUrl + '/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state)
+      });
+      if (response.ok) {
+        await response.json();
+        updateSyncStatus('✓ Synchronisiert', '#1a7f37');
+        return true;
+      }
+    } catch (e) {
+      console.warn('Sync zu Server fehlgeschlagen:', e.message);
+    } finally {
+      syncInProgress = false;
+    }
+    return false;
+  }
+
+  async function syncFromServer() {
+    if (!serverUrl) return;
+    try {
+      const response = await fetch(serverUrl + '/api/sync');
+      if (!response.ok) return;
+      const serverState = await response.json();
+
+      // ZUSAMMENFÜHREN statt ersetzen: lokale (evtl. offline erfasste) Daten
+      // bleiben erhalten, der Server-Stand wird ergänzt. So geht nichts verloren.
+      const merged = mergeState(state, serverState);
+      const mergedCanon = canonState(merged);
+      const localCanon = canonState(state);
+      const serverCanon = canonState(serverState);
+
+      if (mergedCanon === localCanon && mergedCanon === serverCanon) {
+        return; // alles bereits identisch -> nichts zu tun
+      }
+
+      state = merged;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+      // Wenn der Server-Stand vom zusammengeführten Stand abweicht, das
+      // Ergebnis zurückschreiben, damit auch der Server (und andere Geräte)
+      // konvergieren.
+      if (mergedCanon !== serverCanon) {
+        syncToServer().catch(() => {});
+      }
+
+      // Anzeige nur neu aufbauen, wenn sich lokal etwas geändert hat und der
+      // Benutzer nicht gerade tippt (sonst gingen Eingaben verloren).
+      if (mergedCanon !== localCanon) {
+        const erfassungAktiv = document.getElementById("page-erfassung").classList.contains("active");
+        const aktiv = document.activeElement;
+        const tipptGerade = bearbeitungAktiv ||
+          (aktiv && (aktiv.tagName === "INPUT" || aktiv.tagName === "TEXTAREA"));
+        if (!(erfassungAktiv && tipptGerade)) {
+          renderBauabschnitte();
+          renderErfassung(true);
+        }
+        if (document.getElementById("page-auswertung").classList.contains("active")) {
+          renderAuswertung();
+        }
+      }
+    } catch (e) {
+      console.warn('Sync vom Server fehlgeschlagen:', e.message);
+    }
+  }
+
+  async function syncFotoToServer(einsatzId, fotoId, dataUrl) {
+    if (!serverUrl) return false;
+    try {
+      const r = await fetch(serverUrl + '/api/foto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ einsatzId, fotoId, dataUrl })
+      });
+      return r.ok;
+    } catch (e) {
+      console.warn('Foto-Sync fehlgeschlagen:', e.message);
+      return false;
+    }
+  }
+
+  // Markiert ein lokales Foto als erfolgreich zum Server hochgeladen.
+  function markiereFotoAlsHochgeladen(db, fotoId) {
+    const tx = db.transaction("fotos", "readwrite");
+    const store = tx.objectStore("fotos");
+    const g = store.get(fotoId);
+    g.onsuccess = () => { const o = g.result; if (o) { o.uploaded = true; store.put(o); } };
+  }
+
+  // Lädt Fotos vom Server, die lokal noch nicht vorhanden sind.
+  async function syncFotosFromServer() {
+    if (!serverUrl) return;
+    try {
+      const response = await fetch(serverUrl + '/api/fotos');
+      if (!response.ok) return;
+      const serverFotos = await response.json(); // [{fileName, einsatzId, fotoId, dataUrl}]
+      const db = await fotoDb();
+
+      const lokale = await new Promise((resolve, reject) => {
+        const tx = db.transaction("fotos", "readonly");
+        const req = tx.objectStore("fotos").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+      const vorhandeneKeys = new Set(lokale.filter((f) => f.serverKey).map((f) => f.serverKey));
+      const serverKeys = new Set(serverFotos.map((sf) => String(sf.fileName).replace(/\.jpg$/i, "")));
+
+      // 1) Neue Server-Fotos lokal hinzufügen
+      let neue = 0;
+      for (const sf of serverFotos) {
+        const key = String(sf.fileName).replace(/\.jpg$/i, ""); // "einsatzId_fotoId"
+        if (vorhandeneKeys.has(key)) continue;
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction("fotos", "readwrite");
+          const req = tx.objectStore("fotos").add({
+            einsatz_id: sf.einsatzId,
+            dataUrl: sf.dataUrl,
+            erstellt: new Date().toISOString(),
+            serverKey: key,
+            uploaded: true,
+          });
+          req.onsuccess = () => { neue++; resolve(); };
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      // 2) Lokale Fotos entfernen, die zwar hochgeladen waren, aber auf dem
+      //    Server gelöscht wurden (Löschung von anderem Gerät übernehmen).
+      //    Frisch erstellte, noch nicht hochgeladene Fotos (uploaded != true)
+      //    bleiben unangetastet, damit nichts versehentlich verschwindet.
+      let entfernt = 0;
+      for (const f of lokale) {
+        if (f.uploaded === true && f.serverKey && !serverKeys.has(f.serverKey)) {
+          await new Promise((resolve) => {
+            const tx = db.transaction("fotos", "readwrite");
+            const req = tx.objectStore("fotos").delete(f.id);
+            req.onsuccess = () => { entfernt++; resolve(); };
+            req.onerror = () => resolve();
+          });
+        }
+      }
+
+      if (neue > 0 || entfernt > 0) {
+        // Anzeige nur aktualisieren, wenn der Benutzer nicht gerade tippt.
+        const aktiv = document.activeElement;
+        const tippt = bearbeitungAktiv ||
+          (aktiv && (aktiv.tagName === "INPUT" || aktiv.tagName === "TEXTAREA"));
+        if (!tippt) aktualisiereFotoAnzeige();
+      }
+    } catch (e) {
+      console.warn('Foto-Download-Sync fehlgeschlagen:', e.message);
+    }
+  }
+
+  function updateSyncStatus(text, color = '#1a7f37') {
+    const el = document.getElementById("sync-status");
+    if (el) {
+      el.textContent = text;
+      el.style.color = color;
+    }
+  }
+
+  // Lädt lokale Fotos hoch, die noch nicht auf dem Server liegen (z.B. offline
+  // auf der Baustelle aufgenommen). Läuft bei jedem Sync-Takt, sodass solche
+  // Fotos nachträglich synchronisiert werden, sobald wieder Verbindung besteht.
+  let fotoUploadLaeuft = false;
+  async function uploadPendingFotos() {
+    if (!serverUrl || !serverAvailable || fotoUploadLaeuft) return;
+    fotoUploadLaeuft = true;
+    try {
+      const db = await fotoDb();
+      const lokale = await new Promise((resolve, reject) => {
+        const tx = db.transaction("fotos", "readonly");
+        const req = tx.objectStore("fotos").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+      let hochgeladen = 0;
+      for (const f of lokale) {
+        if (f.uploaded === true) continue; // schon auf dem Server
+        const ok = await syncFotoToServer(f.einsatz_id, f.id, f.dataUrl);
+        if (ok) {
+          await new Promise((resolve) => {
+            const tx = db.transaction("fotos", "readwrite");
+            const store = tx.objectStore("fotos");
+            const g = store.get(f.id);
+            g.onsuccess = () => {
+              const o = g.result;
+              if (o) { o.uploaded = true; o.serverKey = f.einsatz_id + "_" + f.id; store.put(o); }
+              resolve();
+            };
+            g.onerror = () => resolve();
+          });
+          hochgeladen++;
+        }
+      }
+      if (hochgeladen > 0) updateSyncStatus('✓ Fotos synchronisiert', '#1a7f37');
+    } catch (e) {
+      console.warn('Foto-Upload-Sync fehlgeschlagen:', e.message);
+    } finally {
+      fotoUploadLaeuft = false;
+    }
+  }
+
+  // Ein Sync-Takt: Verbindung prüfen und – wenn verfügbar – Daten und Fotos in
+  // beide Richtungen abgleichen. Erkennt auch einen Reconnect nach
+  // zwischenzeitlichem Verbindungsverlust, ohne dass die Seite neu geladen
+  // werden muss.
+  async function syncTakt() {
+    if (!serverUrl) return;
+    const ok = await checkServerConnection();
+    const warVerbunden = serverAvailable;
+    serverAvailable = ok;
+    if (!ok) {
+      updateSyncStatus('⚠️ Lokal (kein Server)', '#ff9800');
+      return;
+    }
+    if (!warVerbunden) updateSyncStatus('🔗 Server verbunden');
+    await syncFromServer();        // Daten zusammenführen (beide Richtungen)
+    await uploadPendingFotos();    // liegengebliebene Fotos hochladen
+    await syncFotosFromServer();   // neue/gelöschte Server-Fotos übernehmen
+  }
+
+  // Sync starten: sofort und danach alle 5 Sekunden (mit Reconnect-Erkennung)
+  if (serverUrl) {
+    syncTakt();
+    setInterval(syncTakt, 5000);
+  }
 
   function renderAuswertung() {
     const von = awVon.value;
@@ -871,21 +1401,22 @@
 
       <h3>Alle Einträge</h3>
       <table class="data-table">
-        <thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th></tr></thead>
+        <thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead>
         <tbody>
           ${
             eintraege.length === 0
-              ? '<tr><td colspan="7" class="empty">Keine Einträge im gewählten Zeitraum.</td></tr>'
+              ? '<tr><td colspan="8" class="empty">Keine Einträge im gewählten Zeitraum.</td></tr>'
               : eintraege
                   .map(
                     (e) => `
               <tr>
                 <td>${escapeHtml(e.datum)}</td>
                 <td>${escapeHtml(e.bauabschnitt_name)}</td>
-                <td>${escapeHtml(e.firma)}</td>
+                <td>${escapeHtml(e.firma || "")}</td>
                 <td>${e.anzahl_arbeiter}</td>
                 <td>${e.stunden}</td>
                 <td>${e.mannstunden.toFixed(2)}</td>
+                <td>${escapeHtml(e.taetigkeit || "")}</td>
                 <td>${escapeHtml(e.notiz || "")}</td>
               </tr>`
                   )
