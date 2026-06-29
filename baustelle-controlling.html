@@ -94,11 +94,12 @@
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling <span class="version">v2.4</span></h1>
+  <h1>🏗️ Baustelle Controlling <span class="version">v2.5</span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
     <button class="tab" data-page="auswertung">Auswertung</button>
+    <button class="tab" data-page="daten">Daten / Backup</button>
   </nav>
 </header>
 <main>
@@ -137,6 +138,33 @@
       <button type="submit">Aktualisieren</button>
     </form>
     <div id="auswertung-content"></div>
+  </section>
+
+  <section id="page-daten" class="page">
+    <h2>Daten sichern &amp; zwischen Geräten übertragen</h2>
+    <p class="hint">
+      Wichtig: Die App speichert alle Daten und Fotos <strong>nur lokal im jeweiligen Browser</strong> –
+      sie werden <strong>nicht automatisch zwischen Handy und Desktop synchronisiert</strong>.
+      Um Daten vom Handy auf der Baustelle ins Büro zu bekommen:
+      <strong>auf dem Handy „Backup exportieren"</strong>, die Datei z.&nbsp;B. per Mail/Cloud/USB übertragen
+      und <strong>auf dem Desktop „Backup importieren"</strong> (Zusammenführen).
+    </p>
+
+    <div class="export-buttons">
+      <button type="button" id="daten-export">⬇️ Backup exportieren (inkl. Fotos)</button>
+      <label class="foto-upload-btn">⬆️ Backup importieren
+        <input type="file" id="daten-import" accept="application/json,.json" />
+      </label>
+    </div>
+
+    <div id="daten-status" class="status"></div>
+    <div id="daten-error" class="error"></div>
+
+    <p class="hint">
+      Beim Import wirst du gefragt, ob die Daten <strong>zusammengeführt</strong> (vorhandene behalten und
+      ergänzen – empfohlen) oder <strong>alles ersetzt</strong> werden soll. Beim Zusammenführen werden
+      Bauabschnitte mit gleichem Namen automatisch erkannt und nicht doppelt angelegt.
+    </p>
   </section>
 </main>
 
@@ -255,6 +283,24 @@
     return fotosFuerEinsatz(einsatzId)
       .then((fotos) => Promise.all(fotos.map((f) => fotoLoeschen(f.id))))
       .catch(() => {});
+  }
+
+  function alleFotos() {
+    return fotoDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction("fotos", "readonly");
+      const req = tx.objectStore("fotos").getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    })).catch(() => []);
+  }
+
+  function alleFotosLoeschen() {
+    return fotoDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction("fotos", "readwrite");
+      const req = tx.objectStore("fotos").clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    })).catch(() => {});
   }
 
   // Bild verkleinern & als komprimiertes JPEG (data-URL) zurueckgeben
@@ -899,6 +945,152 @@
     if (pdfBtn) pdfBtn.addEventListener("click", () => exportPdf(von, bis, pdfBtn));
     if (csvBtn) csvBtn.addEventListener("click", () => exportCsv(von, bis));
   }
+
+  // ---- Daten / Backup (Export & Import) ----
+  function normalisiereState(s) {
+    const st = {
+      bauabschnitte: Array.isArray(s && s.bauabschnitte) ? s.bauabschnitte : [],
+      einsaetze: Array.isArray(s && s.einsaetze) ? s.einsaetze : [],
+      nextBaId: Number(s && s.nextBaId) || 1,
+      nextEinsatzId: Number(s && s.nextEinsatzId) || 1,
+    };
+    const maxBa = st.bauabschnitte.reduce((m, b) => Math.max(m, Number(b.id) || 0), 0);
+    const maxEin = st.einsaetze.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
+    if (st.nextBaId <= maxBa) st.nextBaId = maxBa + 1;
+    if (st.nextEinsatzId <= maxEin) st.nextEinsatzId = maxEin + 1;
+    return st;
+  }
+
+  async function exportBackup(btn) {
+    const statusEl = document.getElementById("daten-status");
+    const errEl = document.getElementById("daten-error");
+    errEl.textContent = "";
+    const urText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = "Backup wird erstellt…"; }
+    try {
+      const fotos = await alleFotos();
+      const backup = {
+        format: "baustelle-controlling-backup",
+        version: 1,
+        exportiert: new Date().toISOString(),
+        state: state,
+        fotos: fotos,
+      };
+      const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
+      triggerDownload(blob, `baustelle-backup_${heute()}.json`);
+      statusEl.textContent = `Backup erstellt: ${state.einsaetze.length} Einträge, ${fotos.length} Fotos.`;
+    } catch (e) {
+      errEl.textContent = "Backup fehlgeschlagen: " + (e && e.message ? e.message : "unbekannt");
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = urText; }
+    }
+  }
+
+  async function importBackup(file) {
+    const statusEl = document.getElementById("daten-status");
+    const errEl = document.getElementById("daten-error");
+    statusEl.textContent = "";
+    errEl.textContent = "";
+
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch (e) {
+      errEl.textContent = "Datei konnte nicht gelesen werden – ist das eine gültige Backup-Datei?";
+      return;
+    }
+    if (!data || !data.state || !Array.isArray(data.state.einsaetze)) {
+      errEl.textContent = "Ungültige Backup-Datei (keine Baustellen-Daten gefunden).";
+      return;
+    }
+
+    const eingehend = normalisiereState(data.state);
+    const fotos = Array.isArray(data.fotos) ? data.fotos : [];
+
+    const zusammenfuehren = confirm(
+      "Importierte Daten mit den vorhandenen ZUSAMMENFÜHREN?\n\n" +
+      "OK = Zusammenführen (vorhandene Daten behalten und ergänzen – empfohlen)\n" +
+      "Abbrechen = ALLES ERSETZEN (vorhandene Daten und Fotos werden gelöscht)"
+    );
+
+    try {
+      if (!zusammenfuehren) {
+        if (!confirm("Sicher? Alle aktuell auf diesem Gerät gespeicherten Daten und Fotos werden ersetzt.")) {
+          statusEl.textContent = "Import abgebrochen.";
+          return;
+        }
+        await alleFotosLoeschen();
+        state = eingehend;
+        speicherDaten();
+        for (const f of fotos) {
+          if (f && f.dataUrl != null && f.einsatz_id != null) {
+            await fotoHinzufuegen(Number(f.einsatz_id), f.dataUrl);
+          }
+        }
+        statusEl.textContent = `Ersetzt: ${state.einsaetze.length} Einträge, ${fotos.length} Fotos importiert.`;
+      } else {
+        // Bauabschnitte: nach Name zusammenführen, sonst neu anlegen
+        const baMap = {};
+        for (const b of eingehend.bauabschnitte) {
+          const name = (b.name || "").trim();
+          const vorhanden = state.bauabschnitte.find(
+            (x) => (x.name || "").trim().toLowerCase() === name.toLowerCase()
+          );
+          if (vorhanden) {
+            baMap[b.id] = vorhanden.id;
+          } else {
+            const neuId = state.nextBaId++;
+            state.bauabschnitte.push({ id: neuId, name: b.name, beschreibung: b.beschreibung || "" });
+            baMap[b.id] = neuId;
+          }
+        }
+
+        // Einsätze immer mit neuer ID anhängen (keine ID-Kollisionen zwischen Geräten)
+        const einsatzMap = {};
+        for (const e of eingehend.einsaetze) {
+          const neuId = state.nextEinsatzId++;
+          einsatzMap[e.id] = neuId;
+          state.einsaetze.push({
+            id: neuId,
+            datum: e.datum,
+            bauabschnitt_id: baMap[e.bauabschnitt_id] != null ? baMap[e.bauabschnitt_id] : e.bauabschnitt_id,
+            anzahl_arbeiter: Number(e.anzahl_arbeiter) || 0,
+            stunden: Number(e.stunden) || 0,
+            firma: e.firma || "",
+            notiz: e.notiz || "",
+          });
+        }
+        speicherDaten();
+
+        // Fotos auf die neuen Einsatz-IDs umhängen
+        let fotosImportiert = 0;
+        for (const f of fotos) {
+          const neu = f ? einsatzMap[f.einsatz_id] : undefined;
+          if (neu != null && f.dataUrl != null) {
+            await fotoHinzufuegen(neu, f.dataUrl);
+            fotosImportiert++;
+          }
+        }
+        statusEl.textContent =
+          `Zusammengeführt: ${eingehend.einsaetze.length} Einträge und ${fotosImportiert} Fotos hinzugefügt.`;
+      }
+
+      offeneFotos.clear();
+      renderBauabschnitte();
+      renderErfassung(true);
+    } catch (e) {
+      errEl.textContent = "Import fehlgeschlagen: " + (e && e.message ? e.message : "unbekannt");
+    }
+  }
+
+  document.getElementById("daten-export").addEventListener("click", function () {
+    exportBackup(this);
+  });
+  document.getElementById("daten-import").addEventListener("change", function () {
+    const file = (this.files || [])[0];
+    this.value = "";
+    if (file) importBackup(file);
+  });
 
   // ---- Initial render ----
   renderBauabschnitte();
