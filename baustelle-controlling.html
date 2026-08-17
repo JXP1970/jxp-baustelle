@@ -113,7 +113,7 @@
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v3.9.5</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
+  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v3.9.6</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
@@ -1538,7 +1538,11 @@
   });
 
   // ---- Server Auto-Sync über WLAN ----
-  const serverUrl = window.location.origin === 'file://' ? null : window.location.origin;
+  // Auf statischem Hosting (GitHub Pages) oder als lokale Datei gibt es keinen
+  // Sync-Server -> reiner lokaler Modus (Daten nur auf diesem Gerät, Austausch
+  // per Sicherung/ZIP). Auf dem eigenen PC (localhost/WLAN) läuft der Sync normal.
+  const istStatischesHosting = /(^|\.)github\.io$/i.test(window.location.hostname);
+  const serverUrl = (window.location.protocol === 'file:' || istStatischesHosting) ? null : window.location.origin;
   let serverAvailable = false;
   let syncInProgress = false;
 
@@ -1783,6 +1787,8 @@
   if (serverUrl) {
     syncTakt();
     setInterval(syncTakt, 5000);
+  } else {
+    updateSyncStatus('📴 Lokaler Modus – Daten nur auf diesem Gerät. Bitte am Ende „Sicherung erstellen" und die Datei weitergeben.', '#ff9800');
   }
 
   function renderAuswertung() {
