@@ -39,6 +39,9 @@
   button { padding: 0.45rem 0.9rem; border: none; border-radius: 6px; background: #1f2430; color: #fff; font-weight: 600; cursor: pointer; }
   button.secondary { background: #9aa0ad; }
   button.danger { background: #c0392b; }
+  button.save-btn.gespeichert { background: #1a7f37; }
+  button.save-all { background: #1a7f37; font-size: 1rem; padding: 0.55rem 1.1rem; }
+  button.save-all-float { position: fixed; right: 16px; bottom: 16px; z-index: 40; border-radius: 26px; padding: 0.75rem 1.3rem; box-shadow: 0 4px 12px rgba(0,0,0,0.35); }
   table.data-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
   table.data-table th, table.data-table td { padding: 0.55rem 0.7rem; border-bottom: 1px solid #eee; text-align: left; vertical-align: middle; }
   table.data-table tfoot td { border-top: 2px solid #ddd; border-bottom: none; }
@@ -110,7 +113,7 @@
 </head>
 <body>
 <header>
-  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v3.9.1</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
+  <h1>🏗️ Baustelle Controlling <span style="font-size:0.7rem; opacity:0.7;">v3.9.6</span> <span id="sync-status" style="font-size:0.8rem; margin-left:1rem;"></span></h1>
   <nav>
     <button class="tab active" data-page="erfassung">Tageserfassung</button>
     <button class="tab" data-page="bauabschnitte">Bauabschnitte</button>
@@ -203,6 +206,14 @@
 
   function heute() {
     return new Date().toISOString().slice(0, 10);
+  }
+
+  // Datum fuer die ANZEIGE formatieren: 2026-08-11 -> 11-08-2026.
+  // Intern (Speicher, Sortierung, Datumsfelder) bleibt alles im ISO-Format.
+  function zeigeDatum(iso) {
+    if (!iso || typeof iso !== "string") return "";
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? m[3] + "." + m[2] + "." + m[1] : iso;
   }
 
   function vorTagen(n) {
@@ -775,7 +786,7 @@
           <td><input class="in-notiz" placeholder="Notiz (optional)" value="${escapeHtml(e.notiz || "")}" /></td>
           <td><button class="secondary foto-toggle" data-einsatz="${e.id}">📷 <span class="foto-count" data-count-einsatz="${e.id}">0</span></button></td>
           <td class="actions">
-            <button data-save-einsatz="${e.id}">Speichern</button>
+            <button class="save-btn gespeichert" data-save-einsatz="${e.id}">✓ Gespeichert</button>
             <button class="danger" data-delete-einsatz="${e.id}">Löschen</button>
           </td>
         </tr>`;
@@ -840,7 +851,7 @@
         <input type="date" id="copy-von-datum" value="${escapeHtml(standardQuelle)}" />
         <button type="button" class="secondary" id="copy-von-btn">Übernehmen</button>
       </div>
-      <p class="hint">Pro Bauabschnitt kannst du mehrere Firmen erfassen. Neue Firma in der untersten Zeile eintragen und „Hinzufügen" tippen.</p>
+      <p class="hint">Pro Bauabschnitt kannst du mehrere Firmen erfassen. Neue Firma in der untersten Zeile eintragen. Mit „💾 Alles speichern" (Knopf unten rechts) werden alle Zeilen auf einmal gesichert. Grün = gespeichert, dunkel = noch nicht gespeichert.</p>
       <table class="data-table">
         <thead>
           <tr><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden / Arbeiter</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th><th>Fotos</th><th></th></tr>
@@ -848,12 +859,14 @@
         <tbody>${bloecke}</tbody>
         <tfoot>
           <tr>
-            <td colspan="3"><strong>Gesamt Mannstunden am ${escapeHtml(datum)}</strong></td>
+            <td colspan="3"><strong>Gesamt Mannstunden am ${zeigeDatum(datum)}</strong></td>
             <td class="mannstunden"><strong>${gesamt.toFixed(2)}</strong></td>
             <td colspan="4"></td>
           </tr>
         </tfoot>
-      </table>`;
+      </table>
+      <div style="height:80px"></div>
+      <button type="button" class="save-all save-all-float" id="alles-speichern-btn">💾 Alles speichern</button>`;
 
     // ---- Mannschaft von einem vergangenen Tag übernehmen ----
     const copyBtn = content.querySelector("#copy-von-btn");
@@ -871,7 +884,7 @@
           (e) => !e.deleted && e.datum === quelle && aktiveBaIds.has(e.bauabschnitt_id)
         );
         if (quelleEintraege.length === 0) {
-          errEl.textContent = `Am ${quelle} gibt es keine übernehmbaren Einträge (nur aktive Bauabschnitte).`;
+          errEl.textContent = `Am ${zeigeDatum(quelle)} gibt es keine übernehmbaren Einträge (nur aktive Bauabschnitte).`;
           return;
         }
         // Bereits am aktuellen Tag vorhandene (Bauabschnitt + Firma) nicht doppelt anlegen.
@@ -881,10 +894,10 @@
         );
         const zuKopieren = quelleEintraege.filter((e) => !vorhanden.has(schluessel(e)));
         if (zuKopieren.length === 0) {
-          statusEl.textContent = `Alle Einträge vom ${quelle} sind an diesem Tag bereits vorhanden.`;
+          statusEl.textContent = `Alle Einträge vom ${zeigeDatum(quelle)} sind an diesem Tag bereits vorhanden.`;
           return;
         }
-        if (!confirm(`${zuKopieren.length} Eintrag/Einträge vom ${quelle} auf den ${datum} übernehmen? (Firma, Arbeiter, Stunden, Tätigkeit – Notizen bleiben leer.)`)) return;
+        if (!confirm(`${zuKopieren.length} Eintrag/Einträge vom ${zeigeDatum(quelle)} auf den ${zeigeDatum(datum)} übernehmen? (Firma, Arbeiter, Stunden, Tätigkeit – Notizen bleiben leer.)`)) return;
 
         zuKopieren.forEach((e) => {
           state.einsaetze.push({
@@ -901,7 +914,7 @@
         });
         bearbeitungAktiv = false;
         speicherDaten();
-        statusEl.textContent = `${zuKopieren.length} Einträge vom ${quelle} übernommen.`;
+        statusEl.textContent = `${zuKopieren.length} Einträge vom ${zeigeDatum(quelle)} übernommen.`;
         renderErfassung(true);
       });
     }
@@ -909,16 +922,6 @@
     // Sobald in einem Erfassungsfeld getippt wird: Sync pausieren, bis gespeichert.
     content.querySelectorAll("input").forEach((input) => {
       input.addEventListener("input", () => { bearbeitungAktiv = true; });
-    });
-
-    content.querySelectorAll(".in-anzahl, .in-stunden").forEach((input) => {
-      input.addEventListener("input", () => {
-        const tr = input.closest("tr");
-        const anzahl = Number(tr.querySelector(".in-anzahl").value || 0);
-        const stunden = Number(tr.querySelector(".in-stunden").value || 0);
-        const out = tr.querySelector(".out-mannstunden");
-        if (out) out.textContent = (anzahl * stunden).toFixed(2);
-      });
     });
 
     function leseZeile(tr) {
@@ -931,30 +934,126 @@
       };
     }
 
+    // Untersummen (je Bauabschnitt) und Gesamtsumme live aus den Eingabefeldern
+    // neu berechnen – so stimmen die Summen immer, auch vor dem Speichern.
+    function aktualisiereAlleSummen() {
+      const tbody = content.querySelector("table.data-table tbody");
+      if (!tbody) return;
+      let gesamtNeu = 0, gruppeTd = null, gruppeName = "", gruppeSumme = 0, gruppeHatEintraege = false;
+      const schreibeGruppe = () => {
+        if (gruppeTd) gruppeTd.innerHTML = "<strong>" + escapeHtml(gruppeName) + "</strong>" + (gruppeHatEintraege ? " &nbsp;—&nbsp; Untersumme: " + gruppeSumme.toFixed(2) + " Mannstunden" : "");
+      };
+      Array.from(tbody.children).forEach((tr) => {
+        if (tr.classList.contains("ba-group")) {
+          schreibeGruppe();
+          gruppeTd = tr.querySelector("td");
+          const s = tr.querySelector("strong");
+          gruppeName = s ? s.textContent : "";
+          gruppeSumme = 0; gruppeHatEintraege = false;
+        } else if (tr.dataset.einsatzId) {
+          const ms = Number(tr.querySelector(".in-anzahl").value || 0) * Number(tr.querySelector(".in-stunden").value || 0);
+          const out = tr.querySelector(".out-mannstunden");
+          if (out) out.textContent = ms.toFixed(2);
+          gruppeSumme += ms; gesamtNeu += ms; gruppeHatEintraege = true;
+        } else if (tr.classList.contains("add-row")) {
+          const a = tr.querySelector(".in-anzahl"), st = tr.querySelector(".in-stunden"), out = tr.querySelector(".out-mannstunden");
+          if (a && st && out) out.textContent = (Number(a.value || 0) * Number(st.value || 0)).toFixed(2);
+        }
+      });
+      schreibeGruppe();
+      const gt = content.querySelector("table.data-table tfoot .mannstunden strong");
+      if (gt) gt.textContent = gesamtNeu.toFixed(2);
+    }
+
+    // Eine vorhandene Zeile aus ihren Feldern in den Datensatz schreiben.
+    function schreibeZeile(id, tr) {
+      const z = leseZeile(tr);
+      const e = state.einsaetze.find((x) => x.id === id);
+      if (e && !e.deleted) {
+        e.anzahl_arbeiter = z.anzahl; e.stunden = z.stunden; e.firma = z.firma;
+        e.taetigkeit = z.taetigkeit; e.notiz = z.notiz; e.updatedAt = jetzt();
+      }
+      return z;
+    }
+
+    // Sind alle bestehenden Zeilen gespeichert und keine Neu-Zeile ausgefüllt?
+    function alleSauber() {
+      const dirty = Array.from(content.querySelectorAll("tr[data-einsatz-id] .save-btn")).some((b) => !b.classList.contains("gespeichert"));
+      const neuMitDaten = Array.from(content.querySelectorAll("tr.add-row[data-new-ba]")).some((tr) => {
+        const z = leseZeile(tr);
+        return z.firma || z.anzahl > 0 || z.stunden > 0 || z.taetigkeit || z.notiz;
+      });
+      return !dirty && !neuMitDaten;
+    }
+
+    // Live-Summen bei Änderung von Anzahl/Stunden.
+    content.querySelectorAll(".in-anzahl, .in-stunden").forEach((input) => {
+      input.addEventListener("input", aktualisiereAlleSummen);
+    });
+
+    // Tippen in einer bereits gespeicherten Zeile -> Button wird wieder dunkel ("noch nicht gespeichert").
+    content.querySelectorAll("tr[data-einsatz-id]").forEach((tr) => {
+      const saveBtn = tr.querySelector(".save-btn");
+      tr.querySelectorAll("input").forEach((input) => {
+        input.addEventListener("input", () => {
+          if (saveBtn && saveBtn.classList.contains("gespeichert")) {
+            saveBtn.classList.remove("gespeichert");
+            saveBtn.textContent = "Speichern";
+          }
+        });
+      });
+    });
+
+    // "Alles speichern": alle vorhandenen Zeilen sichern und alle ausgefüllten
+    // Neu-Zeilen auf einmal anlegen.
+    function allesSpeichern() {
+      const errEl = document.getElementById("erfassung-error");
+      const statusEl = document.getElementById("erfassung-status");
+      errEl.textContent = "";
+      let ungueltig = false;
+      content.querySelectorAll("tr[data-einsatz-id], tr.add-row[data-new-ba]").forEach((tr) => {
+        const z = leseZeile(tr);
+        if (z.anzahl < 0 || z.stunden < 0) ungueltig = true;
+      });
+      if (ungueltig) { errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein"; return; }
+      content.querySelectorAll("tr[data-einsatz-id]").forEach((tr) => schreibeZeile(Number(tr.dataset.einsatzId), tr));
+      let neu = 0;
+      content.querySelectorAll("tr.add-row[data-new-ba]").forEach((tr) => {
+        const z = leseZeile(tr);
+        if (!(z.firma || z.anzahl > 0 || z.stunden > 0 || z.taetigkeit || z.notiz)) return;
+        state.einsaetze.push({ id: neueId(), datum, bauabschnitt_id: Number(tr.dataset.newBa), firma: z.firma, anzahl_arbeiter: z.anzahl, stunden: z.stunden, taetigkeit: z.taetigkeit, notiz: z.notiz, updatedAt: jetzt() });
+        neu++;
+      });
+      bearbeitungAktiv = false;
+      speicherDaten();
+      statusEl.textContent = "Alles gespeichert" + (neu ? ` (${neu} neu hinzugefügt)` : "");
+      renderErfassung(true);
+    }
+    const alles1 = content.querySelector("#alles-speichern-btn");
+    const alles2 = content.querySelector("#alles-speichern-btn2");
+    if (alles1) alles1.addEventListener("click", allesSpeichern);
+    if (alles2) alles2.addEventListener("click", allesSpeichern);
+
     content.querySelectorAll("[data-save-einsatz]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const id = Number(btn.dataset.saveEinsatz);
-        const { anzahl, stunden, firma, taetigkeit, notiz } = leseZeile(btn.closest("tr"));
+        const tr = btn.closest("tr");
         const errEl = document.getElementById("erfassung-error");
         const statusEl = document.getElementById("erfassung-status");
         errEl.textContent = "";
-        if (anzahl < 0 || stunden < 0) {
+        const z = leseZeile(tr);
+        if (z.anzahl < 0 || z.stunden < 0) {
           errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
           return;
         }
-        const e = state.einsaetze.find((x) => x.id === id);
-        if (e) {
-          e.anzahl_arbeiter = anzahl;
-          e.stunden = stunden;
-          e.firma = firma;
-          e.taetigkeit = taetigkeit;
-          e.notiz = notiz;
-          e.updatedAt = jetzt();
-        }
-        bearbeitungAktiv = false;
+        schreibeZeile(id, tr);
         speicherDaten();
-        statusEl.textContent = `Gespeichert: ${firma || "(ohne Firma)"}`;
-        renderErfassung(true);
+        // Nur diese Zeile grün markieren – andere Zeilen (auch ungespeicherte) bleiben erhalten.
+        btn.classList.add("gespeichert");
+        btn.textContent = "✓ Gespeichert";
+        aktualisiereAlleSummen();
+        bearbeitungAktiv = !alleSauber();
+        statusEl.textContent = `Gespeichert: ${z.firma || "(ohne Firma)"}`;
       });
     });
 
@@ -969,6 +1068,8 @@
           errEl.textContent = "Anzahl Arbeiter und Stunden müssen positive Zahlen sein";
           return;
         }
+        // Erst alle vorhandenen Zeilen sichern, damit deren Änderungen beim Neuaufbau nicht verloren gehen.
+        content.querySelectorAll("tr[data-einsatz-id]").forEach((tr) => schreibeZeile(Number(tr.dataset.einsatzId), tr));
         state.einsaetze.push({
           id: neueId(),
           datum,
@@ -1182,7 +1283,7 @@
   function exportCsv(von, bis) {
     const { eintraege } = berechneAuswertung(von, bis);
     const headers = ["Datum", "Bauabschnitt", "Firma", "Anzahl Arbeiter", "Stunden", "Mannstunden", "Tätigkeit", "Notiz"];
-    const zeilen = eintraege.map((e) => [e.datum, e.bauabschnitt_name, e.firma || "", e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2), e.taetigkeit || "", e.notiz || ""]);
+    const zeilen = eintraege.map((e) => [zeigeDatum(e.datum), e.bauabschnitt_name, e.firma || "", e.anzahl_arbeiter, e.stunden, e.mannstunden.toFixed(2), e.taetigkeit || "", e.notiz || ""]);
     const csv = [headers, ...zeilen].map((r) => r.map(escapeCsv).join(";")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     triggerDownload(blob, `Auswertung_${von}_bis_${bis}.csv`);
@@ -1211,7 +1312,7 @@
 
     printArea.innerHTML = `
       <h1>Baustelle Controlling – Auswertung</h1>
-      <div class="meta">Zeitraum: ${escapeHtml(von)} bis ${escapeHtml(bis)}<br>Gesamt Mannstunden: <strong>${gesamt.toFixed(2)}</strong></div>
+      <div class="meta">Zeitraum: ${zeigeDatum(von)} bis ${zeigeDatum(bis)}<br>Gesamt Mannstunden: <strong>${gesamt.toFixed(2)}</strong></div>
       ${
         fertigeAbschnitte.length === 0
           ? ""
@@ -1220,7 +1321,7 @@
         ${fertigeAbschnitte
           .map(
             (b) =>
-              b.firmen.map((f) => `<tr><td>${escapeHtml(b.name)}</td><td>${escapeHtml(f.name)}</td><td>${f.mannstunden.toFixed(2)}</td><td>${escapeHtml(b.beginn || "—")}</td><td>${escapeHtml(b.ende || "—")}</td><td>${escapeHtml(b.betoniertAm || "—")}</td><td>${escapeHtml(b.abgeschlossenAm || "—")}</td><td>${f.arbeitstage}</td></tr>`).join("") +
+              b.firmen.map((f) => `<tr><td>${escapeHtml(b.name)}</td><td>${escapeHtml(f.name)}</td><td>${f.mannstunden.toFixed(2)}</td><td>${zeigeDatum(b.beginn) || "—"}</td><td>${zeigeDatum(b.ende) || "—"}</td><td>${zeigeDatum(b.betoniertAm) || "—"}</td><td>${zeigeDatum(b.abgeschlossenAm) || "—"}</td><td>${f.arbeitstage}</td></tr>`).join("") +
               `<tr><td colspan="2"><strong>Summe ${escapeHtml(b.name)}</strong></td><td><strong>${b.mannstunden.toFixed(2)}</strong></td><td colspan="5"></td></tr>`
           )
           .join("")}
@@ -1228,7 +1329,7 @@
       }
       <h2>Mannstunden pro Tag</h2>
       <table><thead><tr><th>Tag</th><th>Mannstunden</th></tr></thead><tbody>
-        ${proTag.length ? proTag.map((t) => `<tr><td>${escapeHtml(t.datum)}</td><td>${t.mannstunden.toFixed(2)}</td></tr>`).join("") : '<tr><td colspan="2">Keine Einträge</td></tr>'}
+        ${proTag.length ? proTag.map((t) => `<tr><td>${zeigeDatum(t.datum)}</td><td>${t.mannstunden.toFixed(2)}</td></tr>`).join("") : '<tr><td colspan="2">Keine Einträge</td></tr>'}
       </tbody></table>
       <h2>Mannstunden pro Bauabschnitt und Firma</h2>
       <table><thead><tr><th>Bauabschnitt</th><th>Firma</th><th>Mannstunden</th><th>Erfasste Tage</th></tr></thead><tbody>
@@ -1259,7 +1360,7 @@
       }
       <h2>Alle Einträge</h2>
       <table><thead><tr><th>Datum</th><th>Bauabschnitt</th><th>Firma</th><th>Anzahl Arbeiter</th><th>Stunden</th><th>Mannstunden</th><th>Tätigkeit</th><th>Notiz</th></tr></thead><tbody>
-        ${eintraege.length ? eintraege.map((e) => `<tr><td>${escapeHtml(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${escapeHtml(e.firma || "")}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td><td>${escapeHtml(e.taetigkeit || "")}</td><td>${escapeHtml(e.notiz || "")}</td></tr>`).join("") : '<tr><td colspan="8">Keine Einträge</td></tr>'}
+        ${eintraege.length ? eintraege.map((e) => `<tr><td>${zeigeDatum(e.datum)}</td><td>${escapeHtml(e.bauabschnitt_name)}</td><td>${escapeHtml(e.firma || "")}</td><td>${e.anzahl_arbeiter}</td><td>${e.stunden}</td><td>${e.mannstunden.toFixed(2)}</td><td>${escapeHtml(e.taetigkeit || "")}</td><td>${escapeHtml(e.notiz || "")}</td></tr>`).join("") : '<tr><td colspan="8">Keine Einträge</td></tr>'}
       </tbody></table>
       ${
         mitFotos.length
@@ -1268,7 +1369,7 @@
               .map(
                 ({ eintrag, fotos }) => `
         <div class="foto-beweis-block">
-          <p><strong>${escapeHtml(eintrag.datum)} – ${escapeHtml(eintrag.bauabschnitt_name)}</strong></p>
+          <p><strong>${zeigeDatum(eintrag.datum)} – ${escapeHtml(eintrag.bauabschnitt_name)}</strong></p>
           <div class="foto-beweis">
             ${fotos.map((f, i) => `<figure><img src="${f.dataUrl}" alt="Beweisfoto" /><figcaption>Foto ${i + 1}</figcaption></figure>`).join("")}
           </div>
@@ -1437,7 +1538,11 @@
   });
 
   // ---- Server Auto-Sync über WLAN ----
-  const serverUrl = window.location.origin === 'file://' ? null : window.location.origin;
+  // Auf statischem Hosting (GitHub Pages) oder als lokale Datei gibt es keinen
+  // Sync-Server -> reiner lokaler Modus (Daten nur auf diesem Gerät, Austausch
+  // per Sicherung/ZIP). Auf dem eigenen PC (localhost/WLAN) läuft der Sync normal.
+  const istStatischesHosting = /(^|\.)github\.io$/i.test(window.location.hostname);
+  const serverUrl = (window.location.protocol === 'file:' || istStatischesHosting) ? null : window.location.origin;
   let serverAvailable = false;
   let syncInProgress = false;
 
@@ -1682,6 +1787,8 @@
   if (serverUrl) {
     syncTakt();
     setInterval(syncTakt, 5000);
+  } else {
+    updateSyncStatus('📴 Lokaler Modus – Daten nur auf diesem Gerät. Bitte am Ende „Sicherung erstellen" und die Datei weitergeben.', '#ff9800');
   }
 
   function renderAuswertung() {
@@ -1718,7 +1825,7 @@
                 .map(
                   (b) => `
                 <tr class="ba-group">
-                  <td colspan="3"><strong>${escapeHtml(b.name)}</strong> <span class="fertig-badge">fertig</span> &nbsp;—&nbsp; Summe: ${b.mannstunden.toFixed(2)} Mannstunden${b.beginn ? ` &nbsp;·&nbsp; Beginn: ${escapeHtml(b.beginn)} &nbsp;·&nbsp; Ende: ${escapeHtml(b.ende)}` : ""}${b.betoniertAm ? ` &nbsp;·&nbsp; betoniert am: ${escapeHtml(b.betoniertAm)}` : ""}${b.abgeschlossenAm ? ` &nbsp;·&nbsp; fertig am: ${escapeHtml(b.abgeschlossenAm)}` : ""}</td>
+                  <td colspan="3"><strong>${escapeHtml(b.name)}</strong> <span class="fertig-badge">fertig</span> &nbsp;—&nbsp; Summe: ${b.mannstunden.toFixed(2)} Mannstunden${b.beginn ? ` &nbsp;·&nbsp; Beginn: ${zeigeDatum(b.beginn)} &nbsp;·&nbsp; Ende: ${zeigeDatum(b.ende)}` : ""}${b.betoniertAm ? ` &nbsp;·&nbsp; betoniert am: ${zeigeDatum(b.betoniertAm)}` : ""}${b.abgeschlossenAm ? ` &nbsp;·&nbsp; fertig am: ${zeigeDatum(b.abgeschlossenAm)}` : ""}</td>
                 </tr>` +
                     b.firmen
                       .map(
@@ -1746,7 +1853,7 @@
               .map(
                 (t) => `
             <tr>
-              <td class="chart-label">${escapeHtml(t.datum)}</td>
+              <td class="chart-label">${zeigeDatum(t.datum)}</td>
               <td class="chart-cell">
                 <div class="bar" style="width:${(t.mannstunden / maxTag) * 100}%"></div>
                 <span>${t.mannstunden.toFixed(2)}</span>
@@ -1845,7 +1952,7 @@
                   .map(
                     (e) => `
               <tr>
-                <td>${escapeHtml(e.datum)}</td>
+                <td>${zeigeDatum(e.datum)}</td>
                 <td>${escapeHtml(e.bauabschnitt_name)}</td>
                 <td>${escapeHtml(e.firma || "")}</td>
                 <td>${e.anzahl_arbeiter}</td>
